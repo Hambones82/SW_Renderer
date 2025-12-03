@@ -27,54 +27,7 @@ namespace Software_Renderer
 
     public class Rasterizer
     {
-        private float EdgeFunction(Vec3 a, Vec3 b, Vec3 c)
-        {
-            return (c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X);
-        }
-
-        //so maybe for speed, rasterizer directly calls pixel shader...?  that way, no list<fragment> allocations...
-        public List<Fragment> RasterizeTriangle(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight)
-        {
-            var fragments = new List<Fragment>();
-
-            float minX = Math.Min(v0.X, Math.Min(v1.X, v2.X));
-            float maxX = Math.Max(v0.X, Math.Max(v1.X, v2.X));
-            float minY = Math.Min(v0.Y, Math.Min(v1.Y, v2.Y));
-            float maxY = Math.Max(v0.Y, Math.Max(v1.Y, v2.Y));
-
-            int x0 = Math.Max(0, (int)Math.Floor(minX));
-            int x1 = Math.Min(fbWidth - 1, (int)Math.Ceiling(maxX));
-            int y0 = Math.Max(0, (int)Math.Floor(minY));
-            int y1 = Math.Min(fbHeight - 1, (int)Math.Ceiling(maxY));
-
-            float area = EdgeFunction(v0, v1, v2);
-            if (area <= 0) return fragments; 
-            
-            for (int y = y0; y <= y1; y++)
-            {
-                for (int x = x0; x <= x1; x++)
-                {
-                    Vec3 p = new Vec3(x + 0.5f, y + 0.5f, 0);
-
-                    float w0 = EdgeFunction(v1, v2, p);
-                    float w1 = EdgeFunction(v2, v0, p);
-                    float w2 = EdgeFunction(v0, v1, p);
-
-                    if (w0 >= 0 && w1 >= 0 && w2 >= 0)
-                    {
-                        w0 /= area;
-                        w1 /= area;
-                        w2 /= area;
-
-                        float depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
-
-                        fragments.Add(new Fragment(x, y, depth, w0, w1, w2, triIndex));
-                    }
-                }
-            }
-
-            return fragments;
-        }
+        
     }
 
     public struct ShadedFragment
@@ -133,6 +86,53 @@ namespace Software_Renderer
         private OutputMerger outputMerger;
         private IVertexShader vertexShader;
 
+        private float EdgeFunction(Vec3 a, Vec3 b, Vec3 c)
+        {
+            return (c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X);
+        }
+      
+        public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
+        {            
+            float minX = Math.Min(v0.X, Math.Min(v1.X, v2.X));
+            float maxX = Math.Max(v0.X, Math.Max(v1.X, v2.X));
+            float minY = Math.Min(v0.Y, Math.Min(v1.Y, v2.Y));
+            float maxY = Math.Max(v0.Y, Math.Max(v1.Y, v2.Y));
+
+            int x0 = Math.Max(0, (int)Math.Floor(minX));
+            int x1 = Math.Min(fbWidth - 1, (int)Math.Ceiling(maxX));
+            int y0 = Math.Max(0, (int)Math.Floor(minY));
+            int y1 = Math.Min(fbHeight - 1, (int)Math.Ceiling(maxY));
+
+            float area = EdgeFunction(v0, v1, v2);
+            if (area <= 0) return;
+
+            for (int y = y0; y <= y1; y++)
+            {
+                for (int x = x0; x <= x1; x++)
+                {
+                    Vec3 p = new Vec3(x + 0.5f, y + 0.5f, 0);
+
+                    float w0 = EdgeFunction(v1, v2, p);
+                    float w1 = EdgeFunction(v2, v0, p);
+                    float w2 = EdgeFunction(v0, v1, p);
+
+                    if (w0 >= 0 && w1 >= 0 && w2 >= 0)
+                    {
+                        w0 /= area;
+                        w1 /= area;
+                        w2 /= area;
+
+                        float depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
+
+                        ShadedFragment outFrag = PixelShade(new Fragment(x, y, depth, w0, w1, w2, triIndex));
+                        frameBuffer.SetPixel(outFrag.X, outFrag.Y, outFrag.Depth, outFrag.Color);
+                    }
+                }
+            }
+
+        }
+
+
         public RenderingPipeline(int width, int height, IPixelShader pixelShader, IVertexShader vertexShader)
         {
             this.width = width;
@@ -153,25 +153,21 @@ namespace Software_Renderer
         {
             for (int i = 0; i < mesh.Triangles.Length; i++)
             {
-                var tri = mesh.Triangles[i];
+                Triangle tri = mesh.Triangles[i];
 
-                var v0 = vertexShader.VertexShade(tri.V0);
-                var v1 = vertexShader.VertexShade(tri.V1);
-                var v2 = vertexShader.VertexShade(tri.V2);
+                VertexShaderOutput v0 = vertexShader.VertexShade(tri.V0);
+                VertexShaderOutput v1 = vertexShader.VertexShade(tri.V1);
+                VertexShaderOutput v2 = vertexShader.VertexShade(tri.V2);
 
                 v0 = PerspectiveDivide(v0);
                 v1 = PerspectiveDivide(v1);
                 v2 = PerspectiveDivide(v2);
 
-                var s0 = ViewportTransform(v0.Position);
-                var s1 = ViewportTransform(v1.Position);
-                var s2 = ViewportTransform(v2.Position);
+                Vec3 s0 = ViewportTransform(v0.Position);
+                Vec3 s1 = ViewportTransform(v1.Position);
+                Vec3 s2 = ViewportTransform(v2.Position);
 
-                List<Fragment> fragments = Rasterize(s0, s1, s2, i);
-
-                List<ShadedFragment> shadedFragments = PixelShade(fragments);
-
-                OutputMerge(shadedFragments, framebuffer);
+                Rasterize(s0, s1, s2, i, width, height, framebuffer);
             }
         }
 
@@ -194,26 +190,15 @@ namespace Software_Renderer
             );
         }
 
-        private List<Fragment> Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex)
+        private ShadedFragment PixelShade(Fragment fragment)
         {
-            return rasterizer.RasterizeTriangle(v0, v1, v2, triIndex, width, height);
+            uint color = pixelShader.Shade(fragment);
+            return new ShadedFragment(fragment.X, fragment.Y, fragment.Depth, color);            
         }
 
-        
-        private List<ShadedFragment> PixelShade(List<Fragment> fragments)
+        private void OutputMerge(ShadedFragment shadedFragment, FrameBuffer framebuffer)
         {
-            var shadedFragments = new List<ShadedFragment>();
-            foreach (var fragment in fragments)
-            {
-                uint color = pixelShader.Shade(fragment);
-                shadedFragments.Add(new ShadedFragment(fragment.X, fragment.Y, fragment.Depth, color));
-            }
-            return shadedFragments;
-        }
-
-        private void OutputMerge(List<ShadedFragment> shadedFragments, FrameBuffer framebuffer)
-        {
-            outputMerger.ProcessFragments(shadedFragments, framebuffer);
+            outputMerger.ProcessFragment(shadedFragment, framebuffer);
         }
     }
 
