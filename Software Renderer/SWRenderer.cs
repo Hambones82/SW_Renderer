@@ -110,11 +110,17 @@ namespace Software_Renderer
             {
                 for (int x = x0; x <= x1; x++)
                 {
-                    Vec3 p = new Vec3(x + 0.5f, y + 0.5f, 0);
+                    //Vec3 p = new Vec3(x + 0.5f, y + 0.5f, 0);
 
-                    float w0 = EdgeFunction(v1, v2, p);
-                    float w1 = EdgeFunction(v2, v0, p);
-                    float w2 = EdgeFunction(v0, v1, p);
+                    float pX = x + 0.5f;
+                    float pY = y + 0.5f;
+
+                    //float w0 = EdgeFunction(v1, v2, p);
+                    float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X);
+                    //float w1 = EdgeFunction(v2, v0, p);
+                    float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);
+                    //float w2 = EdgeFunction(v0, v1, p);
+                    float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
 
                     if (w0 >= 0 && w1 >= 0 && w2 >= 0)
                     {
