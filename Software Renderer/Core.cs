@@ -29,7 +29,7 @@ namespace Software_Renderer
             float rotationRate = 1.0f;
             const float rateNormalization = 0.0000001f;
             int frameCount = 0;
-            int FPSReportingInterval = 10;
+            int FPSReportingInterval = 1;
             Stopwatch stopwatch = Stopwatch.StartNew();
             while (loop)
             {

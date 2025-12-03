@@ -109,8 +109,7 @@ namespace Software_Renderer
             for (int y = y0; y <= y1; y++)
             {
                 for (int x = x0; x <= x1; x++)
-                {
-                    //Vec3 p = new Vec3(x + 0.5f, y + 0.5f, 0);
+                {                     
 
                     float pX = x + 0.5f;
                     float pY = y + 0.5f;
@@ -122,7 +121,9 @@ namespace Software_Renderer
                     //float w2 = EdgeFunction(v0, v1, p);
                     float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
 
-                    if (w0 >= 0 && w1 >= 0 && w2 >= 0)
+                    bool inside = w0 >= 0 && w1 >= 0 && w2 >= 0;
+
+                    if (inside)
                     {
                         w0 /= area;
                         w1 /= area;
@@ -130,8 +131,8 @@ namespace Software_Renderer
 
                         float depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
 
-                        ShadedFragment outFrag = PixelShade(new Fragment(x, y, depth, w0, w1, w2, triIndex));
-                        frameBuffer.SetPixel(outFrag.X, outFrag.Y, outFrag.Depth, outFrag.Color);
+                        PixelShade(new Fragment(x, y, depth, w0, w1, w2, triIndex), out uint color);
+                        frameBuffer.SetPixel(x, y, depth, color);
                     }
                 }
             }
@@ -196,10 +197,9 @@ namespace Software_Renderer
             );
         }
 
-        private ShadedFragment PixelShade(Fragment fragment)
+        private void PixelShade(Fragment fragment, out uint color)
         {
-            uint color = pixelShader.Shade(fragment);
-            return new ShadedFragment(fragment.X, fragment.Y, fragment.Depth, color);            
+            color = pixelShader.Shade(fragment);            
         }
 
         private void OutputMerge(ShadedFragment shadedFragment, FrameBuffer framebuffer)

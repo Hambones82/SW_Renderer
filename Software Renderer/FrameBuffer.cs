@@ -12,12 +12,14 @@ namespace Software_Renderer
         public int height;
         public uint[] pixels;
         public float[] depth;
+        private int _size;
         public FrameBuffer(int width, int height)
         {
             this.width = width;
             this.height = height;
             pixels = new uint[width * height];
             depth = new float[width * height];
+            _size = width * height;
         }
 
         public void SetPixel(int x, int y, uint color)
@@ -45,27 +47,7 @@ namespace Software_Renderer
 
         public void Fill(uint color)
         {
-            for(int i = 0; i < width * height; i++)
-            {
-                pixels[i] = color;
-            }
-            /*for (int x = 0; x < width; x++)
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    SetPixel(x, y, color);
-                }
-            }*/
-            /*
-            foreach (uint i in pixels)
-            {
-                if (i != color)
-                {
-                    Console.WriteLine($"pixel is {i}, intended color is {color}");
-                    Console.WriteLine("a pixel is not the correct color");
-                }
-            }
-            */
+            Array.Fill(pixels, color);            
         }
     }
 }
