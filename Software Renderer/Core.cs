@@ -10,18 +10,20 @@ namespace Software_Renderer
 {
     internal class Core
     {
-        private FrameBuffer _fb;       
+        private FrameBuffer _fb;
+
+        private int width = 800, height = 600;
 
         public Core()
         {
-            _fb = new FrameBuffer(800, 600);
+            _fb = new FrameBuffer(width, height);
             _fb.Fill(255, 0, 0, 0);
         }
 
         public void Run()
         {
             SDLBackEnd backEnd = new SDLBackEnd(_fb);
-            SWRenderer renderer = new SWRenderer(800, 600);              
+            SWRenderer renderer = new SWRenderer(width, height);              
 
             var loop = true;
             long ticksStart = DateTime.Now.Ticks;

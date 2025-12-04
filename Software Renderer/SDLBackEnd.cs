@@ -10,12 +10,14 @@ namespace Software_Renderer
 {
     internal class SDLBackEnd
     {
-        private int width = 800, height = 600;
+        private int width, height;
         private nint window, renderer, renderTexture;
         private FrameBuffer _fb;
         
         public SDLBackEnd(FrameBuffer fb)
         {
+            width = fb.width;
+            height = fb.height;
             if (!SDL.Init(SDL.InitFlags.Video))
             {
                 SDL.LogError(SDL.LogCategory.System, $"SDL could not initialize: {SDL.GetError()}");
@@ -33,6 +35,7 @@ namespace Software_Renderer
             {
                 Console.WriteLine("texture creation failed");
             }
+            
         }
         public bool UpdateGraphics()
         {

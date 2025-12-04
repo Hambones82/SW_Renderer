@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Numerics;
+using System.Diagnostics;
 
 namespace Software_Renderer
 {
@@ -76,36 +78,74 @@ namespace Software_Renderer
 
             float area = EdgeFunction(v0, v1, v2);
             if (area <= 0) return;
+            int SIMDcount = Vector<float>.Count;
 
             Parallel.For(y0, y1 + 1,
                 (y) =>
-                {
-                    float pY = y + 0.5f;
+                {                    
+                    float pY = (float)y + 0.5f;
                     int pixelNum = y * width + x0;
-                    bool steppedIn = false;                    
-                    for (int x = x0; x <= x1; x++)
+                    //this is assming the SIMD is a certain bit size...                    
+                    Span<float> vals = stackalloc float[SIMDcount];
+
+                    //Vector<float> xValues = new Vector<float>(x0);
+                    for (int i = 0; i < SIMDcount; i++)
                     {
-                        float pX = x + 0.5f;                                                
-                        float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X);                        
-                        float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);                        
-                        float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
+                        vals[i] = x0 + i;
+                    }
 
-                        bool inside = w0 >= 0 && w1 >= 0 && w2 >= 0;
+                    Vector<float> xValues = new Vector<float>(vals);
 
-                        if (inside)
-                        {
+                    bool steppedIn = false;
+                    //Vector<float> w0Scalar0 = new Vector<float>(v2.Y - v1.Y);                    
+                    Vector<float> w0RHS = new Vector<float>((pY - v1.Y) * (v2.X - v1.X));
+
+                    //Vector<float> w1Scalar0 = new Vector<float>(v0.Y - v2.Y);                    
+                    Vector<float> w1RHS = new Vector<float>((pY - v2.Y) * (v0.X - v2.X));
+
+                    //Vector<float> w2Scalar0 = new Vector<float>(v1.Y - v0.Y);                    
+                    Vector<float> w2RHS = new Vector<float>((pY - v0.Y) * (v1.X - v0.X));
+
+                    for (int x = x0; x <= x1; x+= SIMDcount)
+                    {
+                        //float pX = x + 0.5f;
+                        //looks like yes, these values are still problematic...                 
+                        Vector<float> pXw0 = xValues + new Vector<float>(0.5f - v1.X);
+                        Vector<float> pXw1 = xValues + new Vector<float>(0.5f - v2.X);
+                        Vector<float> pXw2 = xValues + new Vector<float>(0.5f - v0.X);
+                        //float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X); 
+                        Vector<float> w0 = pXw0 * (v2.Y - v1.Y) - w0RHS;
+                        //float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);                        
+                        Vector<float> w1 = pXw1 * (v0.Y - v2.Y) - w1RHS;
+                        //float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
+                        Vector<float> w2 = pXw2 * (v1.Y - v0.Y) - w2RHS;
+
+                        //vector bool?
+
+                        //Vector4 inside =  w0 >= Vector4.Zero && w1 >= Vector4.Zero && w2 >= Vector4.Zero;
+                        var inside = 
+                        Vector.GreaterThanOrEqual(w0, Vector<float>.Zero) &
+                        Vector.GreaterThanOrEqual(w1, Vector<float>.Zero) &
+                        Vector.GreaterThanOrEqual(w2, Vector<float>.Zero);
+                        
+                        
+                        if(!Vector.EqualsAll(inside, Vector<int>.Zero))
+                        {                            
                             w0 /= area;
                             w1 /= area;
                             w2 /= area;
 
-                            float depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
-                            uint color = pixelShader.Shade(x, y, depth, w0, w1, w2, triIndex);
-                            frameBuffer.SetPixel(pixelNum, depth, color);                            
+                            var depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
+                            
+                            var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), new Vector<int>((int)y), 
+                                                                  depth, w0, w1, w2, triIndex);
+                            frameBuffer.SetPixelParallel(x0, pixelNum, inside, depth, color);                            
                             steppedIn = true;
                         }
                         
                         else if (steppedIn) break; 
-                        pixelNum++;
+                        pixelNum+= SIMDcount;
+                        xValues += new Vector<float> ( SIMDcount );
                     }
                 }
 
