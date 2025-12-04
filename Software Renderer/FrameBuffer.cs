@@ -39,6 +39,12 @@ namespace Software_Renderer
             depth[width * y + x] = inDepth;
         }
 
+        public void SetPixel(int pixelNum, float inDepth, uint color)
+        {
+            pixels[pixelNum] = color;
+            depth[pixelNum] = inDepth;
+        }
+
         public void Fill(byte a, byte r, byte g, byte b)
         {
             uint color = ((uint)a << 24) + ((uint)r << 16) + ((uint)g << 8) + (uint)b;

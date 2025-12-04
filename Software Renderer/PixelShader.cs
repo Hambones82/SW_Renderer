@@ -7,10 +7,11 @@ using System.Threading.Tasks;
 namespace Software_Renderer
 {    
     public interface IPixelShader
-    {
-        uint Shade(Fragment fragment);
+    {        
+        uint Shade(int x, int y, float depth, float w0, float w1, float w2, int triIndex);
     }
 
+    /*
     public class SimpleColorShader : IPixelShader
     {
         private uint[] colors;
@@ -24,15 +25,15 @@ namespace Software_Renderer
         {
             return colors[fragment.TriangleIndex % colors.Length];
         }
-    }
+    }*/
 
     public class DepthShader : IPixelShader
     {
         public DepthShader() {}
 
-        public uint Shade(Fragment fragment)
+        public uint Shade(int x, int y, float depth, float w0, float w1, float w2, int triIndex)
         {
-            return (uint)(fragment.Depth * (float)(0x00FFFFFF)) + 0xFF000000;
+            return (uint)(depth * (float)(0x00FFFFFF)) + 0xFF000000;
         }
     }
 }

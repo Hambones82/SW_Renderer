@@ -29,15 +29,18 @@ namespace Software_Renderer
             float rotationRate = 1.0f;
             const float rateNormalization = 0.0000001f;
             int frameCount = 0;
-            int FPSReportingInterval = 1;
-            Stopwatch stopwatch = Stopwatch.StartNew();
+            int FPSReportingInterval = 4;
+            const float backendFrameRate = 30f;
+            float BackendInterval = (1.0f / backendFrameRate) * 1000f;
+            Stopwatch FPSReportTimer = Stopwatch.StartNew();
+            Stopwatch BackendOutputTimer = Stopwatch.StartNew();
             while (loop)
             {
                 frameCount++;
-                if (stopwatch.Elapsed.TotalSeconds > FPSReportingInterval)
+                if (FPSReportTimer.Elapsed.TotalSeconds > FPSReportingInterval)
                 {
                     Console.WriteLine($"{frameCount/ FPSReportingInterval}FPS");
-                    stopwatch.Restart();
+                    FPSReportTimer.Restart();
                     frameCount = 0;
                 }
                 long dt = DateTime.Now.Ticks - ticksStart;
@@ -45,8 +48,13 @@ namespace Software_Renderer
                 var initialMesh = CubeFactory.CreateCube();
                 var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));
                 renderer.Render(mesh, _fb);
-                loop = backEnd.UpdateGraphics();
-                _fb.Fill(0);
+
+                if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
+                {                    
+                    BackendOutputTimer.Restart();
+                    loop = backEnd.UpdateGraphics();
+                    _fb.Fill(0);
+                }
             }
             backEnd.Destroy();            
         }

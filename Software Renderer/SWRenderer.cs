@@ -25,11 +25,6 @@ namespace Software_Renderer
         }
     }
 
-    public class Rasterizer
-    {
-        
-    }
-
     public struct ShadedFragment
     {
         public int X, Y;
@@ -44,29 +39,7 @@ namespace Software_Renderer
             Color = color;
         }
     }
-    
-    public class OutputMerger
-    {        
-
-        public OutputMerger()
-        {
-            
-        }
-
-        public void ProcessFragment(ShadedFragment fragment, FrameBuffer framebuffer)
-        {            
-            framebuffer.SetPixel(fragment.X, fragment.Y, fragment.Depth, fragment.Color);
-        }
-
-        public void ProcessFragments(List<ShadedFragment> fragments, FrameBuffer framebuffer)
-        {
-            foreach (var fragment in fragments)
-            {
-                ProcessFragment(fragment, framebuffer);
-            }
-        }
-    }
-    
+        
     public struct VertexShaderOutput
     {
         public Vec4 Position;
@@ -81,9 +54,7 @@ namespace Software_Renderer
     {
         private int width;
         private int height;      
-        private Rasterizer rasterizer;
-        private IPixelShader pixelShader;
-        private OutputMerger outputMerger;
+        private IPixelShader pixelShader;        
         private IVertexShader vertexShader;
 
         private float EdgeFunction(Vec3 a, Vec3 b, Vec3 c)
@@ -106,37 +77,39 @@ namespace Software_Renderer
             float area = EdgeFunction(v0, v1, v2);
             if (area <= 0) return;
 
-            for (int y = y0; y <= y1; y++)
-            {
-                for (int x = x0; x <= x1; x++)
-                {                     
-
-                    float pX = x + 0.5f;
+            Parallel.For(y0, y1 + 1,
+                (y) =>
+                {
                     float pY = y + 0.5f;
-
-                    //float w0 = EdgeFunction(v1, v2, p);
-                    float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X);
-                    //float w1 = EdgeFunction(v2, v0, p);
-                    float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);
-                    //float w2 = EdgeFunction(v0, v1, p);
-                    float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
-
-                    bool inside = w0 >= 0 && w1 >= 0 && w2 >= 0;
-
-                    if (inside)
+                    int pixelNum = y * width + x0;
+                    bool steppedIn = false;                    
+                    for (int x = x0; x <= x1; x++)
                     {
-                        w0 /= area;
-                        w1 /= area;
-                        w2 /= area;
+                        float pX = x + 0.5f;                                                
+                        float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X);                        
+                        float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);                        
+                        float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
 
-                        float depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
+                        bool inside = w0 >= 0 && w1 >= 0 && w2 >= 0;
 
-                        PixelShade(new Fragment(x, y, depth, w0, w1, w2, triIndex), out uint color);
-                        frameBuffer.SetPixel(x, y, depth, color);
+                        if (inside)
+                        {
+                            w0 /= area;
+                            w1 /= area;
+                            w2 /= area;
+
+                            float depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
+                            uint color = pixelShader.Shade(x, y, depth, w0, w1, w2, triIndex);
+                            frameBuffer.SetPixel(pixelNum, depth, color);                            
+                            steppedIn = true;
+                        }
+                        
+                        else if (steppedIn) break; 
+                        pixelNum++;
                     }
                 }
-            }
 
+                );
         }
 
 
@@ -145,10 +118,7 @@ namespace Software_Renderer
             this.width = width;
             this.height = height;
             this.pixelShader = pixelShader;
-            this.vertexShader = vertexShader;
-
-            rasterizer = new Rasterizer();
-            outputMerger = new OutputMerger();
+            this.vertexShader = vertexShader;           
         }
 
         public void NewFrame(uint clearColor, FrameBuffer renderBuffer)
@@ -195,16 +165,6 @@ namespace Software_Renderer
                 (1 - ndc.Y) * height / 2,
                 ndc.Z
             );
-        }
-
-        private void PixelShade(Fragment fragment, out uint color)
-        {
-            color = pixelShader.Shade(fragment);            
-        }
-
-        private void OutputMerge(ShadedFragment shadedFragment, FrameBuffer framebuffer)
-        {
-            outputMerger.ProcessFragment(shadedFragment, framebuffer);
         }
     }
 

@@ -22,7 +22,7 @@ namespace Software_Renderer
                 return;
             }
 
-            if (!SDL.CreateWindowAndRenderer("SDL3 Create Window", width, height, 0, out window, out renderer))
+            if (!SDL.CreateWindowAndRenderer("SW Renderer", width, height, 0, out window, out renderer))
             {
                 SDL.LogError(SDL.LogCategory.Application, $"Error creating window and rendering: {SDL.GetError()}");
                 return;
