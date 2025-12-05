@@ -65,7 +65,9 @@ namespace Software_Renderer
         }
       
         public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
-        {            
+        {
+            int skippedChunks = 0;
+
             float minX = Math.Min(v0.X, Math.Min(v1.X, v2.X));
             float maxX = Math.Max(v0.X, Math.Max(v1.X, v2.X));
             float minY = Math.Min(v0.Y, Math.Min(v1.Y, v2.Y));
@@ -79,6 +81,10 @@ namespace Software_Renderer
             float area = EdgeFunction(v0, v1, v2);
             if (area <= 0) return;
             int SIMDcount = Vector<float>.Count;
+
+            var v0Xp5 = new Vector<float>(0.5f - v0.X);
+            var v1Xp5 = new Vector<float>(0.5f - v1.X);
+            var v2Xp5 = new Vector<float>(0.5f - v2.X);
 
             Parallel.For(y0, y1 + 1,
                 (y) =>
@@ -97,28 +103,28 @@ namespace Software_Renderer
                     Vector<float> xValues = new Vector<float>(vals);
 
                     bool steppedIn = false;
-                    //Vector<float> w0Scalar0 = new Vector<float>(v2.Y - v1.Y);                    
+                    Vector<float> w0Scalar0 = new Vector<float>(v2.Y - v1.Y);                    
                     Vector<float> w0RHS = new Vector<float>((pY - v1.Y) * (v2.X - v1.X));
 
-                    //Vector<float> w1Scalar0 = new Vector<float>(v0.Y - v2.Y);                    
+                    Vector<float> w1Scalar0 = new Vector<float>(v0.Y - v2.Y);                    
                     Vector<float> w1RHS = new Vector<float>((pY - v2.Y) * (v0.X - v2.X));
 
-                    //Vector<float> w2Scalar0 = new Vector<float>(v1.Y - v0.Y);                    
+                    Vector<float> w2Scalar0 = new Vector<float>(v1.Y - v0.Y);                    
                     Vector<float> w2RHS = new Vector<float>((pY - v0.Y) * (v1.X - v0.X));
 
                     for (int x = x0; x <= x1; x+= SIMDcount)
                     {
                         //float pX = x + 0.5f;
                         //looks like yes, these values are still problematic...                 
-                        Vector<float> pXw0 = xValues + new Vector<float>(0.5f - v1.X);
-                        Vector<float> pXw1 = xValues + new Vector<float>(0.5f - v2.X);
-                        Vector<float> pXw2 = xValues + new Vector<float>(0.5f - v0.X);
+                        Vector<float> pXw0 = xValues + v1Xp5;
+                        Vector<float> pXw1 = xValues + v2Xp5;
+                        Vector<float> pXw2 = xValues + v0Xp5;
                         //float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X); 
-                        Vector<float> w0 = pXw0 * (v2.Y - v1.Y) - w0RHS;
+                        Vector<float> w0 = pXw0 * w0Scalar0 - w0RHS;
                         //float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);                        
-                        Vector<float> w1 = pXw1 * (v0.Y - v2.Y) - w1RHS;
+                        Vector<float> w1 = pXw1 * w1Scalar0 - w1RHS;
                         //float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
-                        Vector<float> w2 = pXw2 * (v1.Y - v0.Y) - w2RHS;
+                        Vector<float> w2 = pXw2 * w2Scalar0 - w2RHS;
 
                         //vector bool?
 
@@ -136,10 +142,24 @@ namespace Software_Renderer
                             w2 /= area;
 
                             var depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
-                            
-                            var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), new Vector<int>((int)y), 
-                                                                  depth, w0, w1, w2, triIndex);
-                            frameBuffer.SetPixelParallel(x0, pixelNum, inside, depth, color);                            
+
+                            //compare depth to at dest...
+                            //potential buffer overflow (if we start at last position in depth buffer, vector width can cause overflow
+                            Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
+                            Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
+                            var writeMask = inside & depthComp;
+                            if(!Vector.EqualsAll(writeMask, Vector<int>.Zero))
+                            {                                
+                                var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), new Vector<int>((int)y),
+                                                                                                  depth, w0, w1, w2, triIndex);
+                                frameBuffer.SetPixelParallel(x, pixelNum, writeMask, depth, color);
+                            }
+                            /*
+                            else
+                            {
+                                skippedChunks++;
+                            }
+                            */
                             steppedIn = true;
                         }
                         
@@ -150,6 +170,10 @@ namespace Software_Renderer
                 }
 
                 );
+            //we ARE skipping chunks.
+            //maybe a render to DB first...
+            //we should have a lot of skipped chunks regardless of rotation, since back face is always occluded by front face...
+            //Console.WriteLine($"skipped: {skippedChunks} chunks");
         }
 
 
@@ -159,11 +183,6 @@ namespace Software_Renderer
             this.height = height;
             this.pixelShader = pixelShader;
             this.vertexShader = vertexShader;           
-        }
-
-        public void NewFrame(uint clearColor, FrameBuffer renderBuffer)
-        {         
-            renderBuffer.Fill(clearColor);
         }
 
         public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)

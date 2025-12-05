@@ -22,12 +22,12 @@ namespace Software_Renderer
             V2 = copy_from.V2;
         }
 
-        public Triangle Rotate(Matrix4x4 rotationMatrix)
+        public Triangle Transform(Matrix4x4 transformMatrix)
         {
             var tri = new Triangle(this);
-            var v0 = rotationMatrix.Transform(new Vec4(tri.V0, 1));
-            var v1 = rotationMatrix.Transform(new Vec4(tri.V1, 1));
-            var v2 = rotationMatrix.Transform(new Vec4(tri.V2, 1));
+            var v0 = transformMatrix.Transform(new Vec4(tri.V0, 1));
+            var v1 = transformMatrix.Transform(new Vec4(tri.V1, 1));
+            var v2 = transformMatrix.Transform(new Vec4(tri.V2, 1));
             tri.V0 = new Vec3(v0);
             tri.V1 = new Vec3(v1);
             tri.V2 = new Vec3(v2);
@@ -49,9 +49,19 @@ namespace Software_Renderer
             var rotatedTriangles = new Triangle[mesh.Triangles.Length];
             for (int i = 0; i < mesh.Triangles.Length; i++)
             {
-                rotatedTriangles[i] = mesh.Triangles[i].Rotate(rotation);
+                rotatedTriangles[i] = mesh.Triangles[i].Transform(rotation);
             }
             return new Mesh(rotatedTriangles);
+        }
+
+        public static Mesh Translate(Mesh mesh, Matrix4x4 translation)
+        {
+            var translatedTriangles = new Triangle[mesh.Triangles.Length];
+            for (int i = 0; i < mesh.Triangles.Length; i++)
+            {
+                translatedTriangles[i] = mesh.Triangles[i].Transform(translation);
+            }
+            return new Mesh(translatedTriangles);
         }
     }
 

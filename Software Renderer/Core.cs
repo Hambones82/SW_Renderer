@@ -38,6 +38,8 @@ namespace Software_Renderer
             Stopwatch BackendOutputTimer = Stopwatch.StartNew();
             while (loop)
             {
+                _fb.ClearDB();
+                _fb.Fill(0);
                 frameCount++;
                 if (FPSReportTimer.Elapsed.TotalSeconds > FPSReportingInterval)
                 {
@@ -48,15 +50,21 @@ namespace Software_Renderer
                 long dt = DateTime.Now.Ticks - ticksStart;
                 rotation = (float)dt * rotationRate * rateNormalization;
                 var initialMesh = CubeFactory.CreateCube();
-                var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));
-                renderer.Render(mesh, _fb);
+                var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));                
+                renderer.Render(mesh, _fb);                
+                
+                for(int i = 0; i < 100; i++)
+                {
+                    var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f * i, 0.001f * i, 0.001f * i));
+                    renderer.Render(newMesh, _fb);
+                }
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
                 {                    
                     BackendOutputTimer.Restart();
-                    loop = backEnd.UpdateGraphics();
-                    _fb.Fill(0);
+                    loop = backEnd.UpdateGraphics();                                       
                 }
+                
             }
             backEnd.Destroy();            
         }

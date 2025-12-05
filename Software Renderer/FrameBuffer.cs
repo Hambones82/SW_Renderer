@@ -47,16 +47,48 @@ namespace Software_Renderer
         }
 
         //this needs to actually occur in parallel...
-        public void SetPixelParallel(int xStart, int pixelNum, Vector<int> inside, Vector<float> inDepth, Vector<uint> color)
+        public void SetPixelParallel(int xStart, int pixelNum, Vector<int> mask, Vector<float> inDepth, Vector<uint> color)
         {
-            for(int i = 0; i < Vector<float>.Count; i++)
+            //var maskedPixels = inside & Vector.AsVectorInt32(color);
+
+            int SIMDSize = Vector<float>.Count;
+
+            if(xStart + SIMDSize < width)
             {
-                if((xStart + i < width) && (inside.GetElement(i) != 0))
+                Vector<uint> uIntMask = Vector.AsVectorUInt32(mask);
+                
+                Vector<uint> destPixels = new Vector<uint>(pixels, pixelNum);
+                var comboPixels = Vector.ConditionalSelect(uIntMask, color, destPixels);
+
+                Vector<float> destDepths = new Vector<float>(depth, pixelNum);
+                var comboDepths = Vector.ConditionalSelect(mask, inDepth, destDepths);
+
+
+                unsafe
                 {
-                    pixels[pixelNum + i] = color.GetElement(i);
-                    depth[pixelNum + i] = inDepth.GetElement(i);
+                    fixed (uint* _pixels = &pixels[pixelNum])
+                    {
+                        Vector.Store(comboPixels, _pixels);
+                    }   
+                    fixed(float* _depths = &depth[pixelNum])
+                    {
+                        Vector.Store(comboDepths, _depths);
+                    }
+                }                               
+            }
+            else
+            {
+                for (int i = 0; i < SIMDSize; i++)
+                {
+                    if ((xStart + i < width) && (mask.GetElement(i) != 0))
+                    {
+                        pixels[pixelNum + i] = color.GetElement(i);
+                        depth[pixelNum + i] = inDepth.GetElement(i);
+                    }
                 }
             }
+
+                
         }
 
         public void Fill(byte a, byte r, byte g, byte b)
@@ -68,6 +100,11 @@ namespace Software_Renderer
         public void Fill(uint color)
         {
             Array.Fill(pixels, color);            
+        }
+
+        public void ClearDB()
+        {
+            Array.Fill(depth, float.MaxValue);
         }
     }
 }
