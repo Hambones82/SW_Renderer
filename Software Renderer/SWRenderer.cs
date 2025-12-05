@@ -64,6 +64,7 @@ namespace Software_Renderer
             return (c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X);
         }
       
+        //another idea is to allocate a garbage right band to SIMD write into and then just ignore it when writing to buffer
         public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
         {
             int skippedChunks = 0;
@@ -88,10 +89,11 @@ namespace Software_Renderer
 
             Parallel.For(y0, y1 + 1,
                 (y) =>
-                {                    
+                {
+                    var yVec = new Vector<int>((int)y);
                     float pY = (float)y + 0.5f;
                     int pixelNum = y * width + x0;
-                    //this is assming the SIMD is a certain bit size...                    
+                    
                     Span<float> vals = stackalloc float[SIMDcount];
 
                     //Vector<float> xValues = new Vector<float>(x0);
@@ -103,28 +105,40 @@ namespace Software_Renderer
                     Vector<float> xValues = new Vector<float>(vals);
 
                     bool steppedIn = false;
-                    Vector<float> w0Scalar0 = new Vector<float>(v2.Y - v1.Y);                    
+                    Vector<float> w0Increment = new Vector<float>(v2.Y - v1.Y);                    
                     Vector<float> w0RHS = new Vector<float>((pY - v1.Y) * (v2.X - v1.X));
 
-                    Vector<float> w1Scalar0 = new Vector<float>(v0.Y - v2.Y);                    
+                    Vector<float> w1Increment = new Vector<float>(v0.Y - v2.Y);                    
                     Vector<float> w1RHS = new Vector<float>((pY - v2.Y) * (v0.X - v2.X));
 
-                    Vector<float> w2Scalar0 = new Vector<float>(v1.Y - v0.Y);                    
+                    Vector<float> w2Increment = new Vector<float>(v1.Y - v0.Y);                    
                     Vector<float> w2RHS = new Vector<float>((pY - v0.Y) * (v1.X - v0.X));
+                    
+                    Vector<float> w0Initial = (xValues + v1Xp5) * w0Increment - w0RHS;
+                    Vector<float> w1Initial = (xValues + v2Xp5) * w1Increment - w1RHS;
+                    Vector<float> w2Initial = (xValues + v0Xp5) * w2Increment - w2RHS;
+
+                    var w0 = w0Initial;
+                    var w1 = w1Initial;
+                    var w2 = w2Initial;
+
+                    var w0ScaledIncrement = w0Increment * SIMDcount;
+                    var w1ScaledIncrement = w1Increment * SIMDcount;
+                    var w2ScaledIncrement = w2Increment * SIMDcount;
 
                     for (int x = x0; x <= x1; x+= SIMDcount)
                     {
                         //float pX = x + 0.5f;
                         //looks like yes, these values are still problematic...                 
-                        Vector<float> pXw0 = xValues + v1Xp5;
-                        Vector<float> pXw1 = xValues + v2Xp5;
-                        Vector<float> pXw2 = xValues + v0Xp5;
+                        //Vector<float> pXw0 = xValues + v1Xp5;
+                        //Vector<float> pXw1 = xValues + v2Xp5;
+                        //Vector<float> pXw2 = xValues + v0Xp5;
                         //float w0 = (pX - v1.X) * (v2.Y - v1.Y) - (pY - v1.Y) * (v2.X - v1.X); 
-                        Vector<float> w0 = pXw0 * w0Scalar0 - w0RHS;
+                        //Vector<float> w0 = pXw0 * w0Increment - w0RHS;
                         //float w1 = (pX - v2.X) * (v0.Y - v2.Y) - (pY - v2.Y) * (v0.X - v2.X);                        
-                        Vector<float> w1 = pXw1 * w1Scalar0 - w1RHS;
+                        //Vector<float> w1 = pXw1 * w1Increment - w1RHS;
                         //float w2 = (pX - v0.X) * (v1.Y - v0.Y) - (pY - v0.Y) * (v1.X - v0.X);
-                        Vector<float> w2 = pXw2 * w2Scalar0 - w2RHS;
+                        //Vector<float> w2 = pXw2 * w2Increment - w2RHS;
 
                         //vector bool?
 
@@ -137,11 +151,11 @@ namespace Software_Renderer
                         
                         if(!Vector.EqualsAll(inside, Vector<int>.Zero))
                         {                            
-                            w0 /= area;
-                            w1 /= area;
-                            w2 /= area;
+                            var w0Bary = w0 / area;
+                            var w1Bary = w1 / area;
+                            var w2Bary = w2 / area;
 
-                            var depth = w0 * v0.Z + w1 * v1.Z + w2 * v2.Z;
+                            var depth = w0Bary * v0.Z + w1Bary * v1.Z + w2Bary * v2.Z;
 
                             //compare depth to at dest...
                             //potential buffer overflow (if we start at last position in depth buffer, vector width can cause overflow
@@ -149,9 +163,10 @@ namespace Software_Renderer
                             Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
                             var writeMask = inside & depthComp;
                             if(!Vector.EqualsAll(writeMask, Vector<int>.Zero))
-                            {                                
-                                var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), new Vector<int>((int)y),
-                                                                                                  depth, w0, w1, w2, triIndex);
+                            {
+                                //new Vector<uint>(0xFFFFFFFF);
+                                var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), 
+                                                                      yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);
                                 frameBuffer.SetPixelParallel(x, pixelNum, writeMask, depth, color);
                             }
                             /*
@@ -165,15 +180,14 @@ namespace Software_Renderer
                         
                         else if (steppedIn) break; 
                         pixelNum+= SIMDcount;
-                        xValues += new Vector<float> ( SIMDcount );
+                        //xValues += new Vector<float> ( SIMDcount );
+                        w0 += w0ScaledIncrement;
+                        w1 += w1ScaledIncrement;
+                        w2 += w2ScaledIncrement;
                     }
                 }
 
                 );
-            //we ARE skipping chunks.
-            //maybe a render to DB first...
-            //we should have a lot of skipped chunks regardless of rotation, since back face is always occluded by front face...
-            //Console.WriteLine($"skipped: {skippedChunks} chunks");
         }
 
 
