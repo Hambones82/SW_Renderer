@@ -45,20 +45,38 @@ namespace Software_Renderer
                 {
                     Console.WriteLine($"{frameCount/ FPSReportingInterval}FPS");
                     FPSReportTimer.Restart();
-                    frameCount = 0;
+                    frameCount = 0;    
+                    
+                    if(EventCounterLog.enabled)
+                    {
+                        Console.WriteLine(EventCounterLog.Dump());
+
+                        EventCounterLog.Clear();
+                    }
+                    
                 }
                 long dt = DateTime.Now.Ticks - ticksStart;
                 rotation = (float)dt * rotationRate * rateNormalization;
                 var initialMesh = CubeFactory.CreateCube();
                 var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));                
-                renderer.Render(mesh, _fb);                
-                
-                
-                for(int i = 0; i < 1000; i++)
+                renderer.Render(mesh, _fb);
+
+                //favorable draw order
+                /*
+                for(int i = 0; i < 100; i++)
                 {
-                    var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f * i, 0.001f * i, 0.001f * i));
+                    var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f*i, 0, -0.001f * i));
                     renderer.Render(newMesh, _fb);
                 }
+                */
+
+                //unfavorable
+                /*
+                for (int i = 0; i < 1000; i++)
+                {
+                    var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(-0.1f * i, 0, 0.1f * i));
+                    renderer.Render(newMesh, _fb);
+                }*/
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
                 {                    

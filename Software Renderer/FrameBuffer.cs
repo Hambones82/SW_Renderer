@@ -13,7 +13,7 @@ namespace Software_Renderer
         public int height;
         public uint[] pixels;
         public float[] depth;
-        private int _size;
+        public readonly int _size;
         public FrameBuffer(int width, int height)
         {
             this.width = width;
@@ -48,11 +48,9 @@ namespace Software_Renderer
 
         //this needs to actually occur in parallel...
         public void SetPixelParallel(int xStart, int pixelNum, Vector<int> mask, Vector<float> inDepth, Vector<uint> color)
-        {
-            //var maskedPixels = inside & Vector.AsVectorInt32(color);
-
+        {            
             int SIMDSize = Vector<float>.Count;
-
+            if (pixelNum > _size) return;            
             if(xStart + SIMDSize < width)
             {
                 Vector<uint> uIntMask = Vector.AsVectorUInt32(mask);

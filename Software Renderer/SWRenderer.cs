@@ -121,8 +121,12 @@ namespace Software_Renderer
         
         public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
         {
-            int skippedChunks = 0;
-
+            
+            if(EventCounterLog.enabled)
+            {
+                EventCounterLog.Inc("tris_processed");
+            }
+            
             float minX = Math.Min(v0.X, Math.Min(v1.X, v2.X));
             float maxX = Math.Max(v0.X, Math.Max(v1.X, v2.X));
             float minY = Math.Min(v0.Y, Math.Min(v1.Y, v2.Y));
@@ -143,7 +147,7 @@ namespace Software_Renderer
 
             Parallel.For(y0, y1 + 1, 
                 (y) => 
-                {
+                {                    
                     var yVec = new Vector<int>((int)y);
                     float pY = (float)y + 0.5f;
 
@@ -209,7 +213,10 @@ namespace Software_Renderer
                     for (x = xi0; x <= xi1; x+= SIMDcount)
                     {
                         if (x + SIMDcount >= xi1) { break; }
-                        
+                        //if (pixelNum > frameBuffer._size) 
+                        //{ 
+                        //    Console.WriteLine($"pixel num is greater in SIMD"); 
+                        //}
                         Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                         Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
                         
@@ -219,6 +226,19 @@ namespace Software_Renderer
                                                                     yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);                            
                             frameBuffer.SetPixelParallel(x, pixelNum, depthComp, depth, color);
                         }
+                        
+                        //Vector<float> writeMaskFloat = Vector.AsVectorSingle(depthComp);
+                        if(EventCounterLog.enabled)
+                        {
+                            int countFrags = 0;
+                            for (int i = 0; i < SIMDcount; i++)
+                            {
+                                if (depthComp[i] == -1) countFrags++;
+                            }
+                            EventCounterLog.Inc("fragments_processed", countFrags);
+                            EventCounterLog.Inc("fragments_visited", SIMDcount);
+                        }
+                        
                         
                         pixelNum+= SIMDcount;
                         xValues += new Vector<float> ( SIMDcount );
@@ -233,7 +253,12 @@ namespace Software_Renderer
                         depth += depthIncrement;
                     }
 
+                    //THIS IS SIGNIFICANTLY SLOWER THAN WHEN IT WAS SIMD...  
                     //final, scalar iteration
+                    //still need to check whether we are in the right row and right column - in bounds.  problem is
+                    //at this point we've elided that check since the above for loop loops between the correct bounds.
+                    
+                    if(pixelNum >= 0 && pixelNum < frameBuffer._size)                    
                     {
                         //this can be optimized as well - don't need to do this by barycentric coords, just whether at end of line
                         var inside =
@@ -243,19 +268,53 @@ namespace Software_Renderer
 
 
                         if (!Vector.EqualsAll(inside, Vector<int>.Zero))
-                        {                            
-                            Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
-                            Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
-                            var writeMask = inside & depthComp;
-                            if (!Vector.EqualsAll(writeMask, Vector<int>.Zero))
-                            {                                
-                                var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
-                                                                        yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);                                
-                                frameBuffer.SetPixelParallel(x, pixelNum, writeMask, depth, color);
+                        {
+                            for(int i = 0; i < SIMDcount; i++)
+                            //still need to check whether the depths themselves are all within...                              
+                            //while (x < frameBuffer.width)
+                            {
+                                if (x >= frameBuffer.width)
+                                {
+                                    break;
+                                }                                    
+                                //Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
+                                float depthScalarDest = frameBuffer.depth[pixelNum];
+                                float depthScalarInc = depth.GetElement(i);
+                                bool depthComp = depthScalarInc <= depthScalarDest;
+                                var writeMask = (inside.GetElement(i) == -1) & depthComp;
+
+                                /*
+                                if (!Vector.EqualsAll(writeMask, Vector<int>.Zero))
+                                {
+                                    var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
+                                                                            yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);
+                                    frameBuffer.SetPixelParallel(x, pixelNum, writeMask, depth, color);
+                                }*/
+                                if (writeMask)
+                                {
+                                    var color = pixelShader.Shade(x, y, depthScalarInc, w0.GetElement(i),
+                                                                  w1.GetElement(i), w2.GetElement(i), triIndex);
+                                    frameBuffer.SetPixel(pixelNum, depthScalarInc, color);
+                                }
+
+                                /*
+                                if (EventCounterLog.enabled)
+                                {
+                                    int countFrags = 0;
+                                    for (int i = 0; i < SIMDcount; i++)
+                                    {
+                                        if (writeMask[i] == -1) countFrags++;
+                                    }
+                                    EventCounterLog.Inc("fragments_processed", countFrags);
+                                    EventCounterLog.Inc("fragments_visited", countFrags);
+                                }*/
+                                x++;
+                                pixelNum++;
                             }
                         }
+                        
 
-                        pixelNum += SIMDcount;
+                        //pixelNum += SIMDcount;
                     }
                 }
                 );
