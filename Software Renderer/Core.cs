@@ -53,12 +53,12 @@ namespace Software_Renderer
                 var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));                
                 renderer.Render(mesh, _fb);                
                 
-                /*
-                for(int i = 0; i < 100; i++)
+                
+                for(int i = 0; i < 1000; i++)
                 {
                     var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f * i, 0.001f * i, 0.001f * i));
                     renderer.Render(newMesh, _fb);
-                }*/
+                }
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
                 {                    

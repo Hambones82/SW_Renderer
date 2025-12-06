@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Numerics;
 using System.Diagnostics;
 using System.Reflection.Metadata.Ecma335;
+using System.Dynamic;
 
 namespace Software_Renderer
 {
@@ -53,11 +54,6 @@ namespace Software_Renderer
         }
     }
 
-
-
-
-
-
     public class RenderingPipeline
     {
         private int width;
@@ -70,7 +66,7 @@ namespace Software_Renderer
             return (c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X);
         }
 
-        void TestEdge(Vec3 a, Vec3 b, float y, ref Span<float> xs, ref int count)
+        public static void TestEdge(Vec3 a, Vec3 b, float y, ref Span<float> xs, ref int count)
         {
             float Ay = a.Y, By = b.Y;
             float yMin = Math.Min(Ay, By);
@@ -84,13 +80,11 @@ namespace Software_Renderer
             }
         }
 
-        bool TryGetSpanForScanline(float y, Vec3 v0, Vec3 v1, Vec3 v2,
+        public static bool TryGetSpanForScanline(float y, Vec3 v0, Vec3 v1, Vec3 v2,
                            out float spanMin, out float spanMax)
         {
             Span<float> xs = stackalloc float[3];            
             int count = 0;
-
-            
 
             TestEdge(v0, v1, y, ref xs, ref count);
             TestEdge(v1, v2, y, ref xs, ref count);
@@ -119,8 +113,12 @@ namespace Software_Renderer
             return true;
         }
 
-
-        //another idea is to allocate a garbage right band to SIMD write into and then just ignore it when writing to buffer
+        public struct RowLoopState 
+        {
+            public Vec3 v0, v1, v2;
+            public int x0, x1, y0, y1;
+        }
+        
         public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
         {
             int skippedChunks = 0;
@@ -143,8 +141,8 @@ namespace Software_Renderer
             var v1Xp5 = new Vector<float>(0.5f - v1.X);
             var v2Xp5 = new Vector<float>(0.5f - v2.X);
 
-            Parallel.For(y0, y1 + 1,
-                (y) =>
+            Parallel.For(y0, y1 + 1, 
+                (y) => 
                 {
                     var yVec = new Vector<int>((int)y);
                     float pY = (float)y + 0.5f;
@@ -165,15 +163,13 @@ namespace Software_Renderer
                     
                     Span<float> vals = stackalloc float[SIMDcount];
 
-                    //Vector<float> xValues = new Vector<float>(x0);
                     for (int i = 0; i < SIMDcount; i++)
                     {
                         vals[i] = xi0 + i;
                     }
 
                     Vector<float> xValues = new Vector<float>(vals);
-
-                    bool steppedIn = false;
+                    
                     Vector<float> w0Increment = new Vector<float>(v2.Y - v1.Y);                    
                     Vector<float> w0RHS = new Vector<float>((pY - v1.Y) * (v2.X - v1.X));
 
@@ -209,23 +205,18 @@ namespace Software_Renderer
 
                     var depthIncrement = w0BaryIncrement * v0.Z + w1BaryIncrement * v1.Z + w2BaryIncrement * v2.Z;
 
+                    //stepped SIMD iterations, runs until a final iteration
                     for (x = xi0; x <= xi1; x+= SIMDcount)
                     {
                         if (x + SIMDcount >= xi1) { break; }
                         
-                        /*var w0Bary = w0 / area;
-                        var w1Bary = w1 / area;
-                        var w2Bary = w2 / area;
-                        */
-                        //var depth = w0Bary * v0.Z + w1Bary * v1.Z + w2Bary * v2.Z;
-
                         Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                         Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
                         
                         if(!Vector.EqualsAll(depthComp, Vector<int>.Zero))
-                        {                            
+                        {
                             var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), 
-                                                                    yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);
+                                                                    yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);                            
                             frameBuffer.SetPixelParallel(x, pixelNum, depthComp, depth, color);
                         }
                         
@@ -252,34 +243,21 @@ namespace Software_Renderer
 
 
                         if (!Vector.EqualsAll(inside, Vector<int>.Zero))
-                        {
-                            //can remove divides and instead use increments
-
-
-                            //var depth = w0Bary * v0.Z + w1Bary * v1.Z + w2Bary * v2.Z;
-
-                            //compare depth to at dest...
-                            //potential buffer overflow (if we start at last position in depth buffer, vector width can cause overflow
+                        {                            
                             Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                             Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
                             var writeMask = inside & depthComp;
                             if (!Vector.EqualsAll(writeMask, Vector<int>.Zero))
-                            {
-                                //new Vector<uint>(0xFFFFFFFF);
+                            {                                
                                 var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
-                                                                        yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);
+                                                                        yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);                                
                                 frameBuffer.SetPixelParallel(x, pixelNum, writeMask, depth, color);
                             }
                         }
 
                         pixelNum += SIMDcount;
-                        //xValues += new Vector<float> ( SIMDcount );                        
-
                     }
-
-
                 }
-
                 );
         }
 

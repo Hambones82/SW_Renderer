@@ -35,7 +35,7 @@ namespace Software_Renderer
         }
     }
 
-    public class Mesh
+    public struct Mesh
     {
         public Triangle[] Triangles;
 
