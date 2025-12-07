@@ -23,7 +23,8 @@ namespace Software_Renderer
         public void Run()
         {
             SDLBackEnd backEnd = new SDLBackEnd(_fb);
-            SWRenderer renderer = new SWRenderer(width, height);              
+            //SWRenderer renderer = new SWRenderer(width, height);              
+            RenderingPipeline renderer = new RenderingPipeline(width, height, new DepthShader(), new VertexShader(width, height));
 
             var loop = true;
             long ticksStart = DateTime.Now.Ticks;
@@ -58,17 +59,18 @@ namespace Software_Renderer
                 long dt = DateTime.Now.Ticks - ticksStart;
                 rotation = (float)dt * rotationRate * rateNormalization;
                 var initialMesh = CubeFactory.CreateCube();
-                var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));                
-                renderer.Render(mesh, _fb);
+                var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));
+                //renderer.Render(mesh, _fb);
+                renderer.RenderMesh(mesh, _fb);
 
                 //favorable draw order
-                
+                /*
                 for(int i = 0; i < 100; i++)
                 {
                     var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f*i, 0, -0.001f * i));
                     renderer.Render(newMesh, _fb);
                 }
-                
+                */
 
                 //unfavorable
                 /*
@@ -77,6 +79,7 @@ namespace Software_Renderer
                     var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(-0.1f * i, 0, 0.1f * i));
                     renderer.Render(newMesh, _fb);
                 }*/
+                renderer.NewFrame(_fb);
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
                 {                    

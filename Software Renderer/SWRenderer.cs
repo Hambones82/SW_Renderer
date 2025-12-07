@@ -165,9 +165,26 @@ namespace Software_Renderer
                 }
             }         
         }
-                            
+          
         
-        public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
+        public void NewFrame(FrameBuffer fb)
+        {
+            for(int i = 0; i < fb.numBins; i++)
+            {
+                fb.BinXY(i, out int x, out int y);
+                FlushBin(i, fb, x, y);
+            }
+            bufferedTriangleTail = 0;
+        }
+        
+        public void FlushAllBins(FrameBuffer fb)
+        {
+            NewFrame(fb);
+        }
+
+        public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer, 
+                              uint xClipLow = uint.MinValue, uint xClipHigh = uint.MaxValue,
+                              uint yClipLow = uint.MinValue, uint yClipHigh = uint.MaxValue)
         {
             
             if(EventCounterLog.enabled)
@@ -179,6 +196,11 @@ namespace Software_Renderer
             float maxX = Math.Max(v0.X, Math.Max(v1.X, v2.X));
             float minY = Math.Min(v0.Y, Math.Min(v1.Y, v2.Y));
             float maxY = Math.Max(v0.Y, Math.Max(v1.Y, v2.Y));
+
+            minX = Math.Max(xClipLow, minX);
+            minY = Math.Max(yClipLow, minY);
+            maxX = Math.Min(xClipHigh, maxX);
+            maxY = Math.Min(yClipHigh, maxY);
 
             int x0 = Math.Max(0, (int)Math.Floor(minX));
             int x1 = Math.Min(fbWidth - 1, (int)Math.Ceiling(maxX));
@@ -193,8 +215,9 @@ namespace Software_Renderer
             var v1Xp5 = new Vector<float>(0.5f - v1.X);
             var v2Xp5 = new Vector<float>(0.5f - v2.X);
 
-            Parallel.For(y0, y1 + 1, 
-                (y) => 
+            //Parallel.For(y0, y1 + 1, 
+            //    (y) => 
+            for(int y = y0; y <= y1; y++)
                 {                    
                     var yVec = new Vector<int>((int)y);
                     float pY = (float)y + 0.5f;
@@ -208,7 +231,7 @@ namespace Software_Renderer
                     }
                     else
                     {
-                        return;
+                        continue;
                     }
 
                     int pixelNum = y * width + xi0;
@@ -364,8 +387,7 @@ namespace Software_Renderer
 
                         //pixelNum += SIMDcount;
                     }
-                }
-                );
+            }                
         }
 
 
@@ -405,6 +427,38 @@ namespace Software_Renderer
             }
         }
         */
+
+        private void GetBinCorners(int bx, int by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, 
+                                   FrameBuffer fb)
+        {
+            int tileSize = FrameBuffer.binDimension;
+            int tileXmin = bx * tileSize;
+            int tileXmax = tileXmin + tileSize - 1;
+            int tileYmin = by * tileSize;
+            int tileYmax = tileYmin + tileSize - 1;
+            topLeft = new Vec3(tileXmin, tileYmin, 0);
+            bottomLeft = new Vec3(tileXmin, tileYmax, 0);
+            topRight = new Vec3(tileXmax, tileYmin, 0);
+            bottomRight = new Vec3(tileXmax, tileYmax, 0);
+        }
+
+        private void FlushBin(int binIndex, FrameBuffer framebuffer, int bx, int by)
+        {
+            ref Bin bin = ref framebuffer.bins[binIndex];
+            Vec3 binTopLeft;
+            Vec3 binTopRight;
+            Vec3 binBottomLeft;
+            Vec3 binBottomRight;
+            GetBinCorners(bx, by, out binTopLeft, out binTopRight, out binBottomLeft, out binBottomRight, framebuffer);
+            for(int i = 0; i < bin.tail; i++)
+            {                
+                int triIndex = bin.triIndices[i];
+                ref SSTriangle tri = ref bufferedSSTriangles[triIndex];
+                Rasterize(tri.s0, tri.s1, tri.s2, triIndex, framebuffer.width, framebuffer.height, framebuffer, 
+                    (uint)binTopLeft.X, (uint)binTopRight.X, (uint)binTopLeft.Y, (uint)binBottomRight.Y);
+            }
+            bin.Clear();
+        }
 
         public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
         {
@@ -482,40 +536,37 @@ namespace Software_Renderer
                     {
                         for (int bx = binX0; bx <= binX1; bx++)
                         {
-                            //Tile corners
-                            int tileXmin = bx * tileW;
-                            int tileXmax = tileXmin + tileW - 1;
-                            int tileYmin = by * tileH;
-                            int tileYmax = tileYmin + tileH - 1;
-                            Vec3 topLeft = new Vec3(tileXmin, tileYmin, 0);
-                            Vec3 bottomLeft = new Vec3(tileXmin, tileYmax, 0);
-                            Vec3 topRight = new Vec3(tileXmax, tileYmin, 0);
-                            Vec3 bottomRight = new Vec3(tileXmax, tileYmax, 0);
+                            //Tile corners                                                                                   
+                            GetBinCorners(bx, by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, framebuffer);
 
                             //now edge functions for the tile corners
                             //
-                            if(TestTriInTile(topLeft, topRight, bottomLeft, bottomRight, ref currentTri))
-                            {
-                                DebugDrawRect(topLeft, topRight, bottomLeft, bottomRight, 0xFFFFFFFF, framebuffer);
-                            }
+
+                            //if(TestTriInTile(topLeft, topRight, bottomLeft, bottomRight, ref currentTri))
+                            //{
+                            //    DebugDrawRect(topLeft, topRight, bottomLeft, bottomRight, 0xFFFFFFFF, framebuffer);
+                            //}
 
                             //
 
                             //just render a full tile IF the triangle is within the tile
                             //EdgeFunction
 
-                            /*
+                            
                             int binIndex = by * tilesX + bx;
                             ref Bin bin = ref framebuffer.bins[binIndex];
 
+                            bin.triIndices[bin.tail++] = triBufIndex;
+
+                            if(bufferedTriangleTail >= maxBufferedTriangles)
+                            {
+                                FlushAllBins(framebuffer);
+                            }
                             // If bin is full, flush then reuse it
                             if (bin.tail >= Bin.triangleBufferSize)
                             {
-                                FlushBin(binIndex, framebuffer);
+                                FlushBin(binIndex, framebuffer, bx, by);
                             }
-
-                            bin.triIndices[bin.tail++] = triBufIndex;
-                            */
                         }
                     }
                     
@@ -555,7 +606,7 @@ namespace Software_Renderer
         }
     }
 
-    
+    /*
     internal class SWRenderer
     {        
         private int _width, _height;
@@ -577,5 +628,11 @@ namespace Software_Renderer
             pipeline.RenderMesh(mesh, framebuffer);
             
         }
+
+        public void NewFrame(FrameBuffer fb)
+        {
+
+        }
     }
+    */
 }

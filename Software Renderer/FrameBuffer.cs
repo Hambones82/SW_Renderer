@@ -37,10 +37,15 @@ namespace Software_Renderer
 
         //bins are triangle buffer size, as well as _size in dimension (_size x _size)
 
-        public static int binDimension = 8;
+        public static int binDimension = 64;
         public float[] coarseDepth;
         public Bin[] bins;
 
+        public void BinXY(int binNum, out int x, out int y)
+        {
+            x = binNum % binsX;
+            y = binNum / binsX;
+        }
 
         public FrameBuffer(int width, int height)
         {
@@ -51,6 +56,10 @@ namespace Software_Renderer
             depth = new float[width * height];
             _size = width * height;            
             bins = new Bin[numBins];
+            for(int i = 0; i < numBins; i++)
+            {
+                bins[i] = new Bin();
+            }
             coarseDepth = new float[numBins];
             binsX = width / binDimension; 
             binsY = height / binDimension;

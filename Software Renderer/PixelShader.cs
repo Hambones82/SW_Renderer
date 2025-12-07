@@ -38,13 +38,17 @@ namespace Software_Renderer
         public uint Shade(int x, int y, float depth, float w0, float w1, float w2, int triIndex)
         {
             return (uint)(depth * (float)(0x00FFFFFF)) + 0xFF000000;
+            //return 0xFFFFFFFF;
+            //return (uint)(depth * 255f) * (uint)0x00010101 + (uint)0xFF000000;
+
         }
 
         public Vector<uint> ParallelShade(Vector<int> x, Vector<int> y,
                                           Vector<float> depth, Vector<float> w0,
                                           Vector<float> w1, Vector<float> w2, int triIndex)
         {
-            return new Vector<uint>((uint)(0xFF000000)) + new Vector<uint>((uint)triIndex * 0x000F0F0F);            
+            return new Vector<uint>((uint)(0xFF000000)) + Vector.ConvertToUInt32(depth * 255f) * new Vector<uint>((uint)0x00010101);            
+            //return new Vector<uint>(0xFFFFFFFF);
         }
     }
 }
