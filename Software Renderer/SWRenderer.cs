@@ -123,11 +123,49 @@ namespace Software_Renderer
             return true;
         }
 
-        public struct RowLoopState 
+        
+        //this is for a bbox corner reject
+        //if the edge function for the edge evaluates as <0 for all corners, then the point is not inside the half plane
+        //if the edge function evaluates as >= 0 for any corner, then the point is inside the half plane
+        private bool PointsInsideHalfPlane(Vec3 edgeV1, Vec3 edgeV2, Vec3 c0, Vec3 c1, Vec3 c2, Vec3 c3)
         {
-            public Vec3 v0, v1, v2;
-            public int x0, x1, y0, y1;
+            if (EdgeFunction(edgeV1, edgeV2, c0) >= 0) return true;
+            if (EdgeFunction(edgeV1, edgeV2, c1) >= 0) return true;
+            if (EdgeFunction(edgeV1, edgeV2, c2) >= 0) return true;
+            if (EdgeFunction(edgeV1, edgeV2, c3) >= 0) return true;
+            //edge function is <0 for all four corners
+            return false;
         }
+
+        private bool TestTriInTile(Vec3 topLeft, Vec3 topRight, Vec3 bottomLeft, Vec3 bottomRight, 
+                                    ref SSTriangle tri)
+        {
+            Vec3 c0 = topLeft;
+            Vec3 c1 = topRight;
+            Vec3 c2 = bottomRight;  // <- use bottomRight here
+            Vec3 c3 = bottomLeft;
+
+            // If for ANY edge, all corners are outside (EdgeFunction < 0),
+            // the triangle cannot overlap the tile → reject.
+            if (!PointsInsideHalfPlane(tri.s0, tri.s1, c0, c1, c2, c3)) return false;
+            if (!PointsInsideHalfPlane(tri.s1, tri.s2, c0, c1, c2, c3)) return false;
+            if (!PointsInsideHalfPlane(tri.s2, tri.s0, c0, c1, c2, c3)) return false;
+
+            // If we didn't fail any edge, the tile may overlap the triangle
+            return true;
+        }
+                            
+        public void DebugDrawRect(Vec3 topLeft, Vec3 topRight, Vec3 bottomLeft, Vec3 bottomRight, uint color, FrameBuffer frameBuffer)
+        {
+            for(int x = (int)topLeft.X; x <= (int)topRight.X; x++)
+            {
+                for(int y = (int)topLeft.Y; y <= (int)bottomLeft.Y; y++)
+                {
+                    frameBuffer.SetPixel(x, y, color);
+                }
+            }         
+        }
+                            
         
         public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
         {
@@ -423,7 +461,8 @@ namespace Software_Renderer
                     bufferedTriangleTail--;
                 }
                 else
-                {
+                {                    
+                    //i'd like to analytically calculate the bin start and bin end
                     // Convert bbox to tile coordinates
                     int binX0 = (int)(minX / tileW);
                     int binX1 = (int)(maxX / tileW);
@@ -435,12 +474,37 @@ namespace Software_Renderer
                     if (binY0 < 0) binY0 = 0;
                     if (binX1 >= tilesX) binX1 = tilesX - 1;
                     if (binY1 >= tilesY) binY1 = tilesY - 1;
+                    
 
+                    
                     // Put this triangle into all overlapping bins
                     for (int by = binY0; by <= binY1; by++)
                     {
                         for (int bx = binX0; bx <= binX1; bx++)
                         {
+                            //Tile corners
+                            int tileXmin = bx * tileW;
+                            int tileXmax = tileXmin + tileW - 1;
+                            int tileYmin = by * tileH;
+                            int tileYmax = tileYmin + tileH - 1;
+                            Vec3 topLeft = new Vec3(tileXmin, tileYmin, 0);
+                            Vec3 bottomLeft = new Vec3(tileXmin, tileYmax, 0);
+                            Vec3 topRight = new Vec3(tileXmax, tileYmin, 0);
+                            Vec3 bottomRight = new Vec3(tileXmax, tileYmax, 0);
+
+                            //now edge functions for the tile corners
+                            //
+                            if(TestTriInTile(topLeft, topRight, bottomLeft, bottomRight, ref currentTri))
+                            {
+                                DebugDrawRect(topLeft, topRight, bottomLeft, bottomRight, 0xFFFFFFFF, framebuffer);
+                            }
+
+                            //
+
+                            //just render a full tile IF the triangle is within the tile
+                            //EdgeFunction
+
+                            /*
                             int binIndex = by * tilesX + bx;
                             ref Bin bin = ref framebuffer.bins[binIndex];
 
@@ -451,8 +515,10 @@ namespace Software_Renderer
                             }
 
                             bin.triIndices[bin.tail++] = triBufIndex;
+                            */
                         }
                     }
+                    
                 }
 
                 // If we filled the buffered tri array, flush everything
