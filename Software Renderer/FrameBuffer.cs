@@ -7,6 +7,15 @@ using System.Threading.Tasks;
 
 namespace Software_Renderer
 {
+    public struct Bin
+    {
+        public const int triangleBufferSize = 100;
+        public static int binDimension = 8;
+        public int[] triIndices = new int[triangleBufferSize];
+        public float coarseDepth = float.MaxValue;
+        public Bin() { }
+    }
+
     public class FrameBuffer
     {
         public int width;
@@ -15,14 +24,19 @@ namespace Software_Renderer
         public float[] depth;
         public readonly int _size;
         public float[] coarseDepth;
+                
+        //bins are triangle buffer size, as well as 
+        public Bin[] bins;
+
+
         public FrameBuffer(int width, int height)
         {
             this.width = width;
             this.height = height;
             pixels = new uint[width * height];
             depth = new float[width * height];
-            _size = width * height;
-            coarseDepth = new float[width / Vector<float>.Count * height];
+            _size = width * height;            
+            bins = new Bin[width * height / (Bin.binDimension * Bin.binDimension)];
         }
 
         public void SetPixel(int x, int y, uint color)
