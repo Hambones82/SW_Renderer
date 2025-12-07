@@ -14,6 +14,7 @@ namespace Software_Renderer
         public uint[] pixels;
         public float[] depth;
         public readonly int _size;
+        public float[] coarseDepth;
         public FrameBuffer(int width, int height)
         {
             this.width = width;
@@ -21,6 +22,7 @@ namespace Software_Renderer
             pixels = new uint[width * height];
             depth = new float[width * height];
             _size = width * height;
+            coarseDepth = new float[width / Vector<float>.Count * height];
         }
 
         public void SetPixel(int x, int y, uint color)
@@ -103,6 +105,7 @@ namespace Software_Renderer
         public void ClearDB()
         {
             Array.Fill(depth, float.MaxValue);
+            Array.Fill(coarseDepth, float.MaxValue);
         }
     }
 }
