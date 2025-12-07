@@ -58,6 +58,19 @@ namespace Software_Renderer
     {
         public Vec3 s0, s1, s2;
         public float area;
+
+        // Depth plane: z = A*x + B*y + C
+        public float A, B, C;
+
+        // Optional: tri-wide min/max depth (useful for conservative bounds)
+        public float minZ, maxZ;
+
+        public float EvalDepth(float x, float y)
+        {
+            return A * x + B * y + C;
+        }
+
+        //need to set A, B, C...
     }
 
     public class RenderingPipeline
@@ -170,6 +183,7 @@ namespace Software_Renderer
         public void NewFrame(FrameBuffer fb)
         {
             for(int i = 0; i < fb.numBins; i++)
+            //Parallel.For(0, fb.numBins, (i) =>
             {
                 fb.BinXY(i, out int x, out int y);
                 FlushBin(i, fb, x, y);
@@ -428,7 +442,7 @@ namespace Software_Renderer
         }
         */
 
-        private void GetBinCorners(int bx, int by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, 
+        public void GetBinCorners(int bx, int by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, 
                                    FrameBuffer fb)
         {
             int tileSize = FrameBuffer.binDimension;
@@ -449,15 +463,46 @@ namespace Software_Renderer
             Vec3 binTopRight;
             Vec3 binBottomLeft;
             Vec3 binBottomRight;
-            GetBinCorners(bx, by, out binTopLeft, out binTopRight, out binBottomLeft, out binBottomRight, framebuffer);
+            GetBinCorners(bx, by, out binTopLeft, out binTopRight, out binBottomLeft, out binBottomRight, framebuffer);            
             for(int i = 0; i < bin.tail; i++)
             {                
                 int triIndex = bin.triIndices[i];
                 ref SSTriangle tri = ref bufferedSSTriangles[triIndex];
+                CalculateBinTriDepths(ref tri, bx, by, framebuffer, out float tileTriMinZ, out float tileTriMaxZ);
+                
+                //very confused...  first of all why is it greater than tile min depth...
+                //i think we really want like...  the minimum high depth seen for that tile
+                if (tileTriMinZ > framebuffer.tileMaxDepth[binIndex])
+                {
+                    //Console.WriteLine("skipping tile");
+                    continue;
+                }
+                    
                 Rasterize(tri.s0, tri.s1, tri.s2, triIndex, framebuffer.width, framebuffer.height, framebuffer, 
                     (uint)binTopLeft.X, (uint)binTopRight.X, (uint)binTopLeft.Y, (uint)binBottomRight.Y);
             }
             bin.Clear();
+        }
+
+        public void CalculateBinTriDepths(ref SSTriangle currentTri, int bx, int by, 
+                                          FrameBuffer frameBuffer, out float tileTriMinZ, out float tileTriMaxZ)
+        {
+            GetBinCorners(bx, by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, frameBuffer);            
+
+            float zTL = currentTri.EvalDepth(topLeft.X, topLeft.Y);
+            float zTR = currentTri.EvalDepth(topRight.X, topRight.Y);
+            float zBL = currentTri.EvalDepth(bottomLeft.X, bottomLeft.Y);
+            float zBR = currentTri.EvalDepth(bottomRight.X, bottomRight.Y);
+
+            tileTriMinZ = MathF.Min(
+                currentTri.minZ,
+                MathF.Min(MathF.Min(zTL, zTR), MathF.Min(zBL, zBR))
+            );
+
+            tileTriMaxZ = MathF.Max(
+                currentTri.maxZ,
+                MathF.Max(MathF.Max(zTL, zTR), MathF.Max(zBL, zBR))
+            );
         }
 
         public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
@@ -492,6 +537,8 @@ namespace Software_Renderer
                 bufferedSSTriangles[triBufIndex].s1 = s1;
                 bufferedSSTriangles[triBufIndex].s2 = s2;
 
+                //currentTri.
+
                 bufferedTriangleTail++;
 
                 // Compute screen-space bounds for binning
@@ -513,64 +560,89 @@ namespace Software_Renderer
                 {
                     // Optionally roll back bufferedTriangleTail if you want to reuse that slot
                     bufferedTriangleTail--;
+                    continue;
                 }
-                else
-                {                    
-                    //i'd like to analytically calculate the bin start and bin end
-                    // Convert bbox to tile coordinates
-                    int binX0 = (int)(minX / tileW);
-                    int binX1 = (int)(maxX / tileW);
-                    int binY0 = (int)(minY / tileH);
-                    int binY1 = (int)(maxY / tileH);
 
-                    // Clamp to tile grid
-                    if (binX0 < 0) binX0 = 0;
-                    if (binY0 < 0) binY0 = 0;
-                    if (binX1 >= tilesX) binX1 = tilesX - 1;
-                    if (binY1 >= tilesY) binY1 = tilesY - 1;
+                //--CALCULATE MAX/MIN DEPTH
+                // --- depth plane coefficients ---
+                // Solve for z = A*x + B*y + C using the three vertices
+                float x0 = s0.X, y0 = s0.Y, z0 = s0.Z;
+                float x1 = s1.X, y1 = s1.Y, z1 = s1.Z;
+                float x2 = s2.X, y2 = s2.Y, z2 = s2.Z;
+
+                // Denominator from the 2D area
+                float denom = x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1);
+
+                // Guard against numerical degeneracy
+                if (MathF.Abs(denom) < 1e-6f)
+                {
+                    bufferedTriangleTail--;
+                    continue;
+                }
+
+                // A and B come from solving the linear system; C from one vertex
+                currentTri.A =
+                    (z0 * (y1 - y2) + z1 * (y2 - y0) + z2 * (y0 - y1)) / denom;
+
+                currentTri.B =
+                    (z0 * (x2 - x1) + z1 * (x0 - x2) + z2 * (x1 - x0)) / denom;
+
+                currentTri.C = z0 - currentTri.A * x0 - currentTri.B * y0;
+
+                // Tri-wide depth bounds (not tile-specific, but good for conservative use)
+                currentTri.minZ = MathF.Min(z0, MathF.Min(z1, z2));
+                currentTri.maxZ = MathF.Max(z0, MathF.Max(z1, z2));
+                //--END CALCULATE MAX/MIN DEPTH
+
+
+                //i'd like to analytically calculate the bin start and bin end
+                // Convert bbox to tile coordinates
+                int binX0 = (int)(minX / tileW);
+                int binX1 = (int)(maxX / tileW);
+                int binY0 = (int)(minY / tileH);
+                int binY1 = (int)(maxY / tileH);
+
+                // Clamp to tile grid
+                if (binX0 < 0) binX0 = 0;
+                if (binY0 < 0) binY0 = 0;
+                if (binX1 >= tilesX) binX1 = tilesX - 1;
+                if (binY1 >= tilesY) binY1 = tilesY - 1;
                     
 
                     
-                    // Put this triangle into all overlapping bins
-                    for (int by = binY0; by <= binY1; by++)
-                    {
-                        for (int bx = binX0; bx <= binX1; bx++)
+                // Put this triangle into all overlapping bins
+                for (int by = binY0; by <= binY1; by++)
+                {
+                    for (int bx = binX0; bx <= binX1; bx++)
+                    {                        
+                        int binIndex = by * tilesX + bx;
+
+                        CalculateBinTriDepths(ref currentTri, bx, by, framebuffer, out float tileTriMinZ, out float tileTriMaxZ);
+
+                        // Update global per-tile min/max across all tris
+                        framebuffer.tileMinDepth[binIndex] =
+                            MathF.Min(framebuffer.tileMinDepth[binIndex], tileTriMinZ);
+
+                        framebuffer.tileMaxDepth[binIndex] =
+                            MathF.Min(framebuffer.tileMaxDepth[binIndex], tileTriMaxZ);
+
+                        ref Bin bin = ref framebuffer.bins[binIndex];
+
+                        bin.triIndices[bin.tail++] = triBufIndex;
+
+                        if(bufferedTriangleTail >= maxBufferedTriangles)
                         {
-                            //Tile corners                                                                                   
-                            GetBinCorners(bx, by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, framebuffer);
-
-                            //now edge functions for the tile corners
-                            //
-
-                            //if(TestTriInTile(topLeft, topRight, bottomLeft, bottomRight, ref currentTri))
-                            //{
-                            //    DebugDrawRect(topLeft, topRight, bottomLeft, bottomRight, 0xFFFFFFFF, framebuffer);
-                            //}
-
-                            //
-
-                            //just render a full tile IF the triangle is within the tile
-                            //EdgeFunction
-
-                            
-                            int binIndex = by * tilesX + bx;
-                            ref Bin bin = ref framebuffer.bins[binIndex];
-
-                            bin.triIndices[bin.tail++] = triBufIndex;
-
-                            if(bufferedTriangleTail >= maxBufferedTriangles)
-                            {
-                                FlushAllBins(framebuffer);
-                            }
-                            // If bin is full, flush then reuse it
-                            if (bin.tail >= Bin.triangleBufferSize)
-                            {
-                                FlushBin(binIndex, framebuffer, bx, by);
-                            }
+                            FlushAllBins(framebuffer);
+                        }
+                        // If bin is full, flush then reuse it
+                        if (bin.tail >= Bin.triangleBufferSize)
+                        {
+                            FlushBin(binIndex, framebuffer, bx, by);
                         }
                     }
-                    
                 }
+                    
+                
 
                 // If we filled the buffered tri array, flush everything
                 //if (bufferedTriangleTail >= maxBuffered)

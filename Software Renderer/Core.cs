@@ -64,13 +64,13 @@ namespace Software_Renderer
                 renderer.RenderMesh(mesh, _fb);
 
                 //favorable draw order
-                /*
+                
                 for(int i = 0; i < 100; i++)
                 {
                     var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f*i, 0, -0.001f * i));
-                    renderer.Render(newMesh, _fb);
+                    renderer.RenderMesh(newMesh, _fb);
                 }
-                */
+                
 
                 //unfavorable
                 /*

@@ -47,7 +47,7 @@ namespace Software_Renderer
                                           Vector<float> depth, Vector<float> w0,
                                           Vector<float> w1, Vector<float> w2, int triIndex)
         {
-            return new Vector<uint>((uint)(0xFF000000)) + Vector.ConvertToUInt32(depth * 255f) * new Vector<uint>((uint)0x00010101);            
+            return new Vector<uint>((uint)(0xFF000000)) + Vector.ConvertToUInt32(depth * (float)(0x00FFFFFF));            
             //return new Vector<uint>(0xFFFFFFFF);
         }
     }

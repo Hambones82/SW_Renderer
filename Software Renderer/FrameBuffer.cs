@@ -38,8 +38,11 @@ namespace Software_Renderer
         //bins are triangle buffer size, as well as _size in dimension (_size x _size)
 
         public static int binDimension = 64;
-        public float[] coarseDepth;
+        public float[] tileMinDepth; // length = numBins
+        public float[] tileMaxDepth; // length = numBins
         public Bin[] bins;
+
+        
 
         public void BinXY(int binNum, out int x, out int y)
         {
@@ -60,7 +63,8 @@ namespace Software_Renderer
             {
                 bins[i] = new Bin();
             }
-            coarseDepth = new float[numBins];
+            tileMinDepth = new float[numBins];
+            tileMaxDepth = new float[numBins];
             binsX = width / binDimension; 
             binsY = height / binDimension;
         }
@@ -144,7 +148,8 @@ namespace Software_Renderer
         public void ClearDB()
         {
             Array.Fill(depth, float.MaxValue);
-            Array.Fill(coarseDepth, float.MaxValue);
+            Array.Fill(tileMinDepth, float.MaxValue);
+            Array.Fill(tileMaxDepth, float.MaxValue);
         }
     }
 }
