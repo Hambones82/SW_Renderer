@@ -129,9 +129,20 @@ namespace Software_Renderer
             public int x0, x1, y0, y1;
         }
         
-        public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer)
+        public void Rasterize(
+            Vec3 v0,
+            Vec3 v1,
+            Vec3 v2,
+            int triIndex,
+            int fbWidth,
+            int fbHeight,
+            FrameBuffer frameBuffer,
+            int? clipX0 = null,
+            int? clipX1 = null,
+            int? clipY0 = null,
+            int? clipY1 = null)
         {
-            
+
             if(EventCounterLog.enabled)
             {
                 EventCounterLog.Inc("tris_processed");
@@ -146,6 +157,31 @@ namespace Software_Renderer
             int x1 = Math.Min(fbWidth - 1, (int)Math.Ceiling(maxX));
             int y0 = Math.Max(0, (int)Math.Floor(minY));
             int y1 = Math.Min(fbHeight - 1, (int)Math.Ceiling(maxY));
+
+            if (clipX0.HasValue)
+            {
+                x0 = Math.Max(x0, clipX0.Value);
+            }
+
+            if (clipX1.HasValue)
+            {
+                x1 = Math.Min(x1, clipX1.Value);
+            }
+
+            if (clipY0.HasValue)
+            {
+                y0 = Math.Max(y0, clipY0.Value);
+            }
+
+            if (clipY1.HasValue)
+            {
+                y1 = Math.Min(y1, clipY1.Value);
+            }
+
+            if (x0 > x1 || y0 > y1)
+            {
+                return;
+            }
 
             float area = EdgeFunction(v0, v1, v2);
             if (area <= 0) return;
@@ -468,6 +504,55 @@ namespace Software_Renderer
 
             // After finishing the mesh, flush any remaining triangles
             //FlushAllBins(framebuffer);
+        }
+
+        private void FlushBin(int binIndex, FrameBuffer framebuffer)
+        {
+            ref Bin bin = ref framebuffer.bins[binIndex];
+
+            if (bin.tail <= bin.head)
+            {
+                bin.Clear();
+                return;
+            }
+
+            int tileDimension = FrameBuffer.binDimension;
+            int tileX = binIndex % framebuffer.binsX;
+            int tileY = binIndex / framebuffer.binsX;
+            int tileX0 = tileX * tileDimension;
+            int tileY0 = tileY * tileDimension;
+            int tileX1 = Math.Min(framebuffer.width - 1, tileX0 + tileDimension - 1);
+            int tileY1 = Math.Min(framebuffer.height - 1, tileY0 + tileDimension - 1);
+
+            float coarseDepth = framebuffer.coarseDepth[binIndex];
+
+            for (int i = bin.head; i < bin.tail; i++)
+            {
+                int triBufIndex = bin.triIndices[i];
+                SSTriangle tri = bufferedSSTriangles[triBufIndex];
+
+                float nearDepth = MathF.Min(tri.s0.Z, MathF.Min(tri.s1.Z, tri.s2.Z));
+                float farDepth = MathF.Max(tri.s0.Z, MathF.Max(tri.s1.Z, tri.s2.Z));
+
+                bin.nearDepths[i] = nearDepth;
+                bin.farDepths[i] = farDepth;
+
+                if (farDepth < coarseDepth)
+                {
+                    coarseDepth = farDepth;
+                    framebuffer.coarseDepth[binIndex] = coarseDepth;
+                }
+
+                if (nearDepth > coarseDepth)
+                {
+                    continue;
+                }
+
+                Rasterize(tri.s0, tri.s1, tri.s2, triBufIndex, width, height, framebuffer,
+                    tileX0, tileX1, tileY0, tileY1);
+            }
+
+            bin.Clear();
         }
         private VertexShaderOutput PerspectiveDivide(VertexShaderOutput vertex)
         {
