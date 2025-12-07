@@ -54,12 +54,22 @@ namespace Software_Renderer
         }
     }
 
+    public struct SSTriangle
+    {
+        public Vec3 s0, s1, s2;
+        public float area;
+    }
+
     public class RenderingPipeline
     {
+        private const int maxBufferedTriangles = 200;
         private int width;
         private int height;      
         private IPixelShader pixelShader;        
         private IVertexShader vertexShader;
+        private int bufferedTriangleHead = 0;
+        private int bufferedTriangleTail = 0;
+        private SSTriangle[] bufferedSSTriangles = new SSTriangle[maxBufferedTriangles];
 
         private float EdgeFunction(Vec3 a, Vec3 b, Vec3 c)
         {
@@ -329,6 +339,7 @@ namespace Software_Renderer
             this.vertexShader = vertexShader;           
         }
 
+        /*
         public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
         {
             for (int i = 0; i < mesh.Triangles.Length; i++)
@@ -346,11 +357,118 @@ namespace Software_Renderer
                 Vec3 s0 = ViewportTransform(v0.Position);
                 Vec3 s1 = ViewportTransform(v1.Position);
                 Vec3 s2 = ViewportTransform(v2.Position);
+                
+                //store in each touching bin
+
+                //when any bin has 100, set a rasterization flag and start rasterization after this triangle is placed in all its bins
+
 
                 Rasterize(s0, s1, s2, i, width, height, framebuffer);
             }
         }
+        */
 
+        public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
+        {
+            int maxBuffered = bufferedSSTriangles.Length;
+            int tilesX = framebuffer.binsX;
+            int tilesY = framebuffer.binsY;
+            int tileW = FrameBuffer.binDimension;
+            int tileH = FrameBuffer.binDimension;
+
+            for (int i = 0; i < mesh.Triangles.Length; i++)
+            {
+                Triangle tri = mesh.Triangles[i];
+
+                // Vertex processing
+                VertexShaderOutput v0 = vertexShader.VertexShade(tri.V0);
+                VertexShaderOutput v1 = vertexShader.VertexShade(tri.V1);
+                VertexShaderOutput v2 = vertexShader.VertexShade(tri.V2);
+
+                v0 = PerspectiveDivide(v0);
+                v1 = PerspectiveDivide(v1);
+                v2 = PerspectiveDivide(v2);
+
+                Vec3 s0 = ViewportTransform(v0.Position);
+                Vec3 s1 = ViewportTransform(v1.Position);
+                Vec3 s2 = ViewportTransform(v2.Position);
+
+                // Store in buffered screen-space triangle buffer
+                int triBufIndex = bufferedTriangleTail;
+                ref SSTriangle currentTri = ref bufferedSSTriangles[triBufIndex];
+                bufferedSSTriangles[triBufIndex].s0 = s0;
+                bufferedSSTriangles[triBufIndex].s1 = s1;
+                bufferedSSTriangles[triBufIndex].s2 = s2;
+
+                bufferedTriangleTail++;
+
+                // Compute screen-space bounds for binning
+                float minX = MathF.Min(s0.X, MathF.Min(s1.X, s2.X));
+                float maxX = MathF.Max(s0.X, MathF.Max(s1.X, s2.X));
+                float minY = MathF.Min(s0.Y, MathF.Min(s1.Y, s2.Y));
+                float maxY = MathF.Max(s0.Y, MathF.Max(s1.Y, s2.Y));
+
+                // Clip to framebuffer
+                minX = MathF.Max(0, minX);
+                minY = MathF.Max(0, minY);
+                maxX = MathF.Min(width - 1, maxX);
+                maxY = MathF.Min(height - 1, maxY);
+
+                float area = EdgeFunction(s0, s1, s2);
+
+                // If triangle is completely off-screen, or if it's a back face, skip binning it
+                if (minX > maxX || minY > maxY || area <= 0)
+                {
+                    // Optionally roll back bufferedTriangleTail if you want to reuse that slot
+                    bufferedTriangleTail--;
+                }
+                else
+                {
+                    // Convert bbox to tile coordinates
+                    int binX0 = (int)(minX / tileW);
+                    int binX1 = (int)(maxX / tileW);
+                    int binY0 = (int)(minY / tileH);
+                    int binY1 = (int)(maxY / tileH);
+
+                    // Clamp to tile grid
+                    if (binX0 < 0) binX0 = 0;
+                    if (binY0 < 0) binY0 = 0;
+                    if (binX1 >= tilesX) binX1 = tilesX - 1;
+                    if (binY1 >= tilesY) binY1 = tilesY - 1;
+
+                    // Put this triangle into all overlapping bins
+                    for (int by = binY0; by <= binY1; by++)
+                    {
+                        for (int bx = binX0; bx <= binX1; bx++)
+                        {
+                            int binIndex = by * tilesX + bx;
+                            ref Bin bin = ref framebuffer.bins[binIndex];
+
+                            // If bin is full, flush then reuse it
+                            if (bin.tail >= Bin.triangleBufferSize)
+                            {
+                                FlushBin(binIndex, framebuffer);
+                            }
+
+                            bin.triIndices[bin.tail++] = triBufIndex;
+                        }
+                    }
+                }
+
+                // If we filled the buffered tri array, flush everything
+                //if (bufferedTriangleTail >= maxBuffered)
+                //{
+                //    FlushAllBins(framebuffer);
+                //}
+
+                // NOTE: For now, the per-triangle Rasterize call is gone; it happens via FlushBin/FlushAllBins.
+                // Old:
+                // Rasterize(s0, s1, s2, i, width, height, framebuffer);
+            }
+
+            // After finishing the mesh, flush any remaining triangles
+            //FlushAllBins(framebuffer);
+        }
         private VertexShaderOutput PerspectiveDivide(VertexShaderOutput vertex)
         {
             return new VertexShaderOutput(new Vec4(

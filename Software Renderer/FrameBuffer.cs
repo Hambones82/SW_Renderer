@@ -10,10 +10,18 @@ namespace Software_Renderer
     public struct Bin
     {
         public const int triangleBufferSize = 100;
-        public static int binDimension = 8;
-        public int[] triIndices = new int[triangleBufferSize];
-        public float coarseDepth = float.MaxValue;
-        public Bin() { }
+        public int[] triIndices;
+        //head is where you read from, tail is where you write to
+        public int head = 0, tail = 0;
+        public Bin() 
+        { 
+            triIndices = new int[triangleBufferSize];
+        }
+
+        public void Clear()
+        {
+            head = 0; tail = 0;
+        }
     }
 
     public class FrameBuffer
@@ -23,9 +31,14 @@ namespace Software_Renderer
         public uint[] pixels;
         public float[] depth;
         public readonly int _size;
+        public readonly int numBins;
+        public readonly int binsX;
+        public readonly int binsY;
+
+        //bins are triangle buffer size, as well as _size in dimension (_size x _size)
+
+        public static int binDimension = 8;
         public float[] coarseDepth;
-                
-        //bins are triangle buffer size, as well as 
         public Bin[] bins;
 
 
@@ -33,10 +46,14 @@ namespace Software_Renderer
         {
             this.width = width;
             this.height = height;
+            numBins = width * height / (binDimension * binDimension);
             pixels = new uint[width * height];
             depth = new float[width * height];
             _size = width * height;            
-            bins = new Bin[width * height / (Bin.binDimension * Bin.binDimension)];
+            bins = new Bin[numBins];
+            coarseDepth = new float[numBins];
+            binsX = width / binDimension; 
+            binsY = height / binDimension;
         }
 
         public void SetPixel(int x, int y, uint color)
@@ -61,8 +78,7 @@ namespace Software_Renderer
             pixels[pixelNum] = color;
             depth[pixelNum] = inDepth;
         }
-
-        //this needs to actually occur in parallel...
+        
         public void SetPixelParallel(int xStart, int pixelNum, Vector<int> mask, Vector<float> inDepth, Vector<uint> color)
         {            
             int SIMDSize = Vector<float>.Count;
