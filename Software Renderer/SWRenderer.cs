@@ -414,10 +414,10 @@ namespace Software_Renderer
                 maxX = MathF.Min(width - 1, maxX);
                 maxY = MathF.Min(height - 1, maxY);
 
-                float area = EdgeFunction(s0, s1, s2);
+                currentTri.area = EdgeFunction(s0, s1, s2);
 
                 // If triangle is completely off-screen, or if it's a back face, skip binning it
-                if (minX > maxX || minY > maxY || area <= 0)
+                if (minX > maxX || minY > maxY || currentTri.area <= 0)
                 {
                     // Optionally roll back bufferedTriangleTail if you want to reuse that slot
                     bufferedTriangleTail--;
