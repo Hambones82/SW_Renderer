@@ -11,15 +11,11 @@ namespace Software_Renderer
     {
         public const int triangleBufferSize = 100;
         public int[] triIndices;
-        public float[] nearDepths;
-        public float[] farDepths;
         //head is where you read from, tail is where you write to
         public int head = 0, tail = 0;
-        public Bin()
-        {
+        public Bin() 
+        { 
             triIndices = new int[triangleBufferSize];
-            nearDepths = new float[triangleBufferSize];
-            farDepths = new float[triangleBufferSize];
         }
 
         public void Clear()
