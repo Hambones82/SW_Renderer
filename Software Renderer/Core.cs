@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Numerics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -24,54 +25,83 @@ namespace Software_Renderer
         {
             SDLBackEnd backEnd = new SDLBackEnd(_fb);
             //SWRenderer renderer = new SWRenderer(width, height);              
-            RenderingPipeline renderer = new RenderingPipeline(width, height, new DepthShader(), new VertexShader(width, height));
-
+            VertexShader VS = new VertexShader(width, height);
+            RenderingPipeline renderer = new RenderingPipeline(width, height, new DepthShader(), VS);
+            
             var loop = true;
             long ticksStart = DateTime.Now.Ticks;
             float rotation = 0.0f;
             float rotationRate = 1.0f;
             const float rateNormalization = 0.0000001f;
             int frameCount = 0;
-            int FPSReportingInterval = 4;
-            const float backendFrameRate = 30f;
+            int ReportingInterval = 4;
+            const float backendFrameRate = 60f;
             float BackendInterval = (1.0f / backendFrameRate) * 1000f;
             Stopwatch FPSReportTimer = Stopwatch.StartNew();
             Stopwatch BackendOutputTimer = Stopwatch.StartNew();
+            Stopwatch renderTime = new Stopwatch();
+            int renderMeasurements = 0;
+            float averageRenderTime = 0f;
+            var initialMesh = CubeFactory.CreateCube();
+            var mesh = initialMesh;
+            var initialMVP = VS.GetMVP();    
+            
             while (loop)
             {
+                Matrix4x4 MVP = initialMVP;
                 _fb.ClearDB();
                 _fb.Fill(0);
                 frameCount++;
-                if (FPSReportTimer.Elapsed.TotalSeconds > FPSReportingInterval)
+                if (FPSReportTimer.Elapsed.TotalSeconds > ReportingInterval)
                 {
-                    Console.WriteLine($"{frameCount/ FPSReportingInterval}FPS");
+                    Console.WriteLine($"{frameCount/ ReportingInterval}FPS");
+                    Console.WriteLine($"average render time: {Logger.GetMeasurement(runningAvgLoggerType.wholeFrame)/10f} ns");
                     FPSReportTimer.Restart();
-                    frameCount = 0;    
+                    frameCount = 0;
+                    Logger.ClearMeasurement(runningAvgLoggerType.wholeFrame);
                     
-                    if(EventCounterLog.enabled)
-                    {
-                        Console.WriteLine(EventCounterLog.Dump());
+                    //if(EventCounterLog.enabled)
+                    //{
+                        //Console.WriteLine(EventCounterLog.Dump());
 
-                        EventCounterLog.Clear();
-                    }
+                        //EventCounterLog.Clear();
+                    //}
                     
                 }
                 long dt = DateTime.Now.Ticks - ticksStart;
                 rotation = (float)dt * rotationRate * rateNormalization;
-                var initialMesh = CubeFactory.CreateCube();
-                var mesh = Mesh.Rotate(initialMesh, Matrix4x4.RotationY(rotation));
+                
+                MVP *= Matrix4x4.CreateRotationY(rotation);
+                VS.SetMVP(MVP);
+
                 //renderer.Render(mesh, _fb);
                 renderer.RenderMesh(mesh, _fb);
 
                 //favorable draw order
-                
-                for(int i = 0; i < 100; i++)
-                {
-                    var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.001f*i, 0, -0.001f * i));
-                    renderer.RenderMesh(newMesh, _fb);
-                }
-                
 
+                //capture ms, report that...
+                /*
+                renderTime.Start();
+                
+                for(int i = 0; i < 100000; i++)
+                {
+                    //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
+                    MVP = initialMVP;
+                    MVP *= Matrix4x4.CreateTranslation(0.01f * i, 0, -0.01f * i);
+                    MVP *= Matrix4x4.CreateRotationY(rotation);
+                    VS.SetMVP(MVP);
+                    renderer.RenderMesh(mesh, _fb);
+                }
+                Logger.RecordMeasurement(runningAvgLoggerType.wholeFrame, (float)renderTime.ElapsedTicks);
+
+                //Console.WriteLine($"time to render tris: {renderTime.ElapsedMilliseconds} ms");                
+                //averageRenderTime *= renderMeasurements;
+                //renderMeasurements++;
+                //averageRenderTime += renderTime.ElapsedMilliseconds;
+                //averageRenderTime /= renderMeasurements;                
+                
+                renderTime.Reset();
+                */
                 //unfavorable
                 /*
                 for (int i = 0; i < 1000; i++)

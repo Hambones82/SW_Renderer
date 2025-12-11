@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 namespace Software_Renderer
 {
+    /*
     public struct Vec3
     {
         public float X, Y, Z;
@@ -31,7 +32,8 @@ namespace Software_Renderer
             a.X * b.Y - a.Y * b.X
         );
     }
-
+    */
+    /*
     public struct Vec4
     {
         public float X, Y, Z, W;
@@ -43,10 +45,23 @@ namespace Software_Renderer
 
         public Vec4(Vec3 v, float w) : this(v.X, v.Y, v.Z, w) { }
     }
-
-    public class Matrix4x4
+    */
+    /*
+    public struct Matrix4x4
     {
         private float[,] m = new float[4, 4];
+
+        public Matrix4x4() 
+        {
+            //
+            //for(int i = 0; i < 4; i++)
+            //{
+            //    for( int j = 0; j < 4; j++)
+            //    {
+            //        m[i, j] = 0;
+            //    }
+            //}
+        }
 
         public float this[int row, int col]
         {
@@ -121,5 +136,5 @@ namespace Software_Renderer
                 m[3, 0] * v.X + m[3, 1] * v.Y + m[3, 2] * v.Z + m[3, 3] * v.W
             );
         }
-    }
+    }*/
 }

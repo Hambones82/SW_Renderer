@@ -7,6 +7,7 @@ using System.Numerics;
 using System.Diagnostics;
 using System.Reflection.Metadata.Ecma335;
 using System.Dynamic;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Software_Renderer
 {
@@ -46,9 +47,9 @@ namespace Software_Renderer
         
     public struct VertexShaderOutput
     {
-        public Vec4 Position;
+        public Vector4 Position;
 
-        public VertexShaderOutput(Vec4 position)
+        public VertexShaderOutput(Vector4 position)
         {
             Position = position;
         }
@@ -56,7 +57,7 @@ namespace Software_Renderer
 
     public struct SSTriangle
     {
-        public Vec3 s0, s1, s2;
+        public Vector3 s0, s1, s2;
         public float area;
 
         // Depth plane: z = A*x + B*y + C
@@ -65,17 +66,68 @@ namespace Software_Renderer
         // Optional: tri-wide min/max depth (useful for conservative bounds)
         public float minZ, maxZ;
 
+        public Vector3 topLeftCoord;
         public float EvalDepth(float x, float y)
         {
             return A * x + B * y + C;
         }
-
+        
         //need to set A, B, C...
+
+        //CACHED SETUP INFO
+        //SS Bbox
+        public float minX;
+        public float maxX;
+        public float minY;
+        public float maxY;
+
+        //all values below are SIMD-wide values, and correspond to 0-SIMDWidth increments in x
+        //these setup vaules are:
+        //depth values (top left "initial" value and x and y gradients)
+        //barycentric coords (top left "initial" value and x and y gradients)
+        //edge equation values (top left "initial" and x and y gradients)
+
+        //top left edge equation values
+        public Vector<float> w0TL;
+        public Vector<float> w1TL;
+        public Vector<float> w2TL;
+
+        //edge equation x gradients
+        public float w0dx;
+        public float w1dx;
+        public float w2dx;
+
+        //edge equation y gradients
+        public float w0dy;
+        public float w1dy;
+        public float w2dy;
+
+        //top left barycentric coords
+        public Vector<float> w0BaryTL;
+        public Vector<float> w1BaryTL;
+        public Vector<float> w2BaryTL;
+
+        //barycentric x gradients        
+        public float w0Barydx;
+        public float w1Barydx;
+        public float w2Barydx;
+
+        //barycentric y gradients        
+        public float w0Barydy;
+        public float w1Barydy;
+        public float w2Barydy;
+
+        //top left depth value
+        public Vector<float> depthTL;
+
+        //depth gradients
+        public float depthdx;
+        public float depthdy;        
     }
 
     public class RenderingPipeline
     {
-        private const int maxBufferedTriangles = 200;
+        private const int maxBufferedTriangles = 10000;
         private int width;
         private int height;      
         private IPixelShader pixelShader;        
@@ -84,12 +136,12 @@ namespace Software_Renderer
         private int bufferedTriangleTail = 0;
         private SSTriangle[] bufferedSSTriangles = new SSTriangle[maxBufferedTriangles];
 
-        private float EdgeFunction(Vec3 a, Vec3 b, Vec3 c)
+        private float EdgeFunction(Vector3 a, Vector3 b, Vector3 c)
         {
             return (c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X);
         }
 
-        public static void TestEdge(Vec3 a, Vec3 b, float y, ref Span<float> xs, ref int count)
+        public static void TestEdge(Vector3 a, Vector3 b, float y, ref Span<float> xs, ref int count)
         {
             float Ay = a.Y, By = b.Y;
             float yMin = Math.Min(Ay, By);
@@ -103,7 +155,7 @@ namespace Software_Renderer
             }
         }
 
-        public static bool TryGetSpanForScanline(float y, Vec3 v0, Vec3 v1, Vec3 v2,
+        public static bool TryGetSpanForScanline(float y, Vector3 v0, Vector3 v1, Vector3 v2,
                            out float spanMin, out float spanMax)
         {
             Span<float> xs = stackalloc float[3];            
@@ -140,7 +192,8 @@ namespace Software_Renderer
         //this is for a bbox corner reject
         //if the edge function for the edge evaluates as <0 for all corners, then the point is not inside the half plane
         //if the edge function evaluates as >= 0 for any corner, then the point is inside the half plane
-        private bool PointsInsideHalfPlane(Vec3 edgeV1, Vec3 edgeV2, Vec3 c0, Vec3 c1, Vec3 c2, Vec3 c3)
+        private bool PointsInsideHalfPlane(Vector3 edgeV1,  Vector3 edgeV2, Vector3 c0, 
+                                           Vector3 c1,      Vector3 c2,     Vector3 c3)
         {
             if (EdgeFunction(edgeV1, edgeV2, c0) >= 0) return true;
             if (EdgeFunction(edgeV1, edgeV2, c1) >= 0) return true;
@@ -150,16 +203,16 @@ namespace Software_Renderer
             return false;
         }
 
-        private bool TestTriInTile(Vec3 topLeft, Vec3 topRight, Vec3 bottomLeft, Vec3 bottomRight, 
-                                    ref SSTriangle tri)
+        private bool TestTriInTile(Vector3 topLeft,     Vector3 topRight,   Vector3 bottomLeft, 
+                                   Vector3 bottomRight, ref SSTriangle tri)
         {
-            Vec3 c0 = topLeft;
-            Vec3 c1 = topRight;
-            Vec3 c2 = bottomRight;  // <- use bottomRight here
-            Vec3 c3 = bottomLeft;
+            Vector3 c0 = topLeft;
+            Vector3 c1 = topRight;
+            Vector3 c2 = bottomRight;
+            Vector3 c3 = bottomLeft;
 
             // If for ANY edge, all corners are outside (EdgeFunction < 0),
-            // the triangle cannot overlap the tile → reject.
+            // the triangle cannot overlap the tile -> reject.
             if (!PointsInsideHalfPlane(tri.s0, tri.s1, c0, c1, c2, c3)) return false;
             if (!PointsInsideHalfPlane(tri.s1, tri.s2, c0, c1, c2, c3)) return false;
             if (!PointsInsideHalfPlane(tri.s2, tri.s0, c0, c1, c2, c3)) return false;
@@ -168,7 +221,8 @@ namespace Software_Renderer
             return true;
         }
                             
-        public void DebugDrawRect(Vec3 topLeft, Vec3 topRight, Vec3 bottomLeft, Vec3 bottomRight, uint color, FrameBuffer frameBuffer)
+        public void DebugDrawRect(Vector3 topLeft,      Vector3 topRight,   Vector3 bottomLeft,
+                                  Vector3 bottomRight,  uint color,         FrameBuffer frameBuffer)
         {
             for(int x = (int)topLeft.X; x <= (int)topRight.X; x++)
             {
@@ -182,12 +236,12 @@ namespace Software_Renderer
         
         public void NewFrame(FrameBuffer fb)
         {
-            for(int i = 0; i < fb.numBins; i++)
-            //Parallel.For(0, fb.numBins, (i) =>
+            //for(int i = 0; i < fb.numBins; i++)
+            Parallel.For(0, fb.numBins, (i) =>
             {
                 fb.BinXY(i, out int x, out int y);
                 FlushBin(i, fb, x, y);
-            }
+            });
             bufferedTriangleTail = 0;
         }
         
@@ -196,211 +250,196 @@ namespace Software_Renderer
             NewFrame(fb);
         }
 
-        public void Rasterize(Vec3 v0, Vec3 v1, Vec3 v2, int triIndex, int fbWidth, int fbHeight, FrameBuffer frameBuffer, 
+        //rasterize should get SSTriangle, not the individual vertices.
+        //we can also remove fbwidth and height, which are obtainable from frameBuffer
+        public void Rasterize(ref SSTriangle tri, FrameBuffer frameBuffer, 
                               uint xClipLow = uint.MinValue, uint xClipHigh = uint.MaxValue,
                               uint yClipLow = uint.MinValue, uint yClipHigh = uint.MaxValue)
         {
-            
-            if(EventCounterLog.enabled)
+            Vector3 v0 = tri.s0;
+            Vector3 v1 = tri.s1;
+            Vector3 v2 = tri.s2;
+
+            int fbWidth = frameBuffer.width;
+            int fbHeight = frameBuffer.height;
+
+            if(Logger.enabled)
             {
-                EventCounterLog.Inc("tris_processed");
+                Logger.Inc("tris_processed");
             }
             
-            float minX = Math.Min(v0.X, Math.Min(v1.X, v2.X));
-            float maxX = Math.Max(v0.X, Math.Max(v1.X, v2.X));
-            float minY = Math.Min(v0.Y, Math.Min(v1.Y, v2.Y));
-            float maxY = Math.Max(v0.Y, Math.Max(v1.Y, v2.Y));
-
-            minX = Math.Max(xClipLow, minX);
-            minY = Math.Max(yClipLow, minY);
-            maxX = Math.Min(xClipHigh, maxX);
-            maxY = Math.Min(yClipHigh, maxY);
+            
+            float minX = Math.Max(xClipLow, tri.minX);
+            float minY = Math.Max(yClipLow, tri.minY);
+            float maxX = Math.Min(xClipHigh, tri.maxX);
+            float maxY = Math.Min(yClipHigh, tri.maxY);
 
             int x0 = Math.Max(0, (int)Math.Floor(minX));
             int x1 = Math.Min(fbWidth - 1, (int)Math.Ceiling(maxX));
             int y0 = Math.Max(0, (int)Math.Floor(minY));
             int y1 = Math.Min(fbHeight - 1, (int)Math.Ceiling(maxY));
-
-            float area = EdgeFunction(v0, v1, v2);
-            if (area <= 0) return;
+            
+            if (tri.area <= 0) return;
+            //thsi is a constant
             int SIMDcount = Vector<float>.Count;
+            
+            Vector<float> w0TLBin = tri.w0TL 
+                                + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.w0dx)
+                                + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.w0dy);
+            Vector<float> w1TLBin = tri.w1TL
+                                + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.w1dx)
+                                + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.w1dy);
+            Vector<float> w2TLBin = tri.w2TL
+                                + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.w2dx)
+                                + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.w2dy);
 
-            var v0Xp5 = new Vector<float>(0.5f - v0.X);
-            var v1Xp5 = new Vector<float>(0.5f - v1.X);
-            var v2Xp5 = new Vector<float>(0.5f - v2.X);
+            //values for top-left pixel in bin
+            //can adjust this to remove a division as this has already been done in triangle setup
+            Vector<float> w0BaryTLBin = w0TLBin / tri.area;
+            Vector<float> w1BaryTLBin = w1TLBin / tri.area;
+            Vector<float> w2BaryTLBin = w2TLBin / tri.area;
 
-            //Parallel.For(y0, y1 + 1, 
-            //    (y) => 
-            for(int y = y0; y <= y1; y++)
-                {                    
-                    var yVec = new Vector<int>((int)y);
-                    float pY = (float)y + 0.5f;
+            Vector<float> depthTLBin = tri.depthTL
+                                    + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.depthdx)
+                                    + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.depthdy);
 
-                    int xi0, xi1;
+            Vector<float> w0 = w0TLBin;
+            Vector<float> w1 = w1TLBin;
+            Vector<float> w2 = w2TLBin;
 
-                    if (TryGetSpanForScanline(pY, v0, v1, v2, out float xMin, out float xMax))
-                    {
-                        xi0 = Math.Max(x0, (int)Math.Ceiling(xMin));
-                        xi1 = Math.Min(x1, (int)Math.Floor(xMax));                        
-                    }
-                    else
-                    {
-                        continue;
-                    }
+            Vector<float> w0Bary = w0BaryTLBin;
+            Vector<float> w1Bary = w1BaryTLBin;
+            Vector<float> w2Bary = w2BaryTLBin;
 
-                    int pixelNum = y * width + xi0;
+            Vector<float> depth = depthTLBin;
+
+            for (int y = y0; y <= y1; y++)
+            {       
                     
-                    Span<float> vals = stackalloc float[SIMDcount];
+                var yVec = new Vector<int>((int)y);
+                float pY = (float)y + 0.5f;
 
-                    for (int i = 0; i < SIMDcount; i++)
-                    {
-                        vals[i] = xi0 + i;
-                    }
+                int xi0, xi1;
 
-                    Vector<float> xValues = new Vector<float>(vals);
-                    
-                    Vector<float> w0Increment = new Vector<float>(v2.Y - v1.Y);                    
-                    Vector<float> w0RHS = new Vector<float>((pY - v1.Y) * (v2.X - v1.X));
+                //might want to elimiate this or just replace it with a "does this tile overlap tri" test
+                if (TryGetSpanForScanline(pY, v0, v1, v2, out float xMin, out float xMax))
+                {
+                    xi0 = Math.Max(x0, (int)Math.Ceiling(xMin));
+                    xi1 = Math.Min(x1, (int)Math.Floor(xMax));                        
+                }
+                else
+                {
+                    continue;
+                }
 
-                    Vector<float> w1Increment = new Vector<float>(v0.Y - v2.Y);                    
-                    Vector<float> w1RHS = new Vector<float>((pY - v2.Y) * (v0.X - v2.X));
+                int pixelNum = y * width + xi0;
+                
+                Vector<float> xValues = new Vector<float>(xi0) + Constants.SIMDIncrement;
 
-                    Vector<float> w2Increment = new Vector<float>(v1.Y - v0.Y);                    
-                    Vector<float> w2RHS = new Vector<float>((pY - v0.Y) * (v1.X - v0.X));
-                    
-                    Vector<float> w0Initial = (xValues + v1Xp5) * w0Increment - w0RHS;
-                    Vector<float> w1Initial = (xValues + v2Xp5) * w1Increment - w1RHS;
-                    Vector<float> w2Initial = (xValues + v0Xp5) * w2Increment - w2RHS;
+                int x;
 
-                    var w0 = w0Initial;
-                    var w1 = w1Initial;
-                    var w2 = w2Initial;
+                //stepped SIMD iterations, runs until a final iteration
 
-                    var w0ScaledIncrement = w0Increment * SIMDcount;
-                    var w1ScaledIncrement = w1Increment * SIMDcount;
-                    var w2ScaledIncrement = w2Increment * SIMDcount;
+                float horizontalOffset = xi0 - x0;
 
-                    var w0Bary = w0 / area;
-                    var w1Bary = w1 / area;
-                    var w2Bary = w2 / area;
+                w0 += new Vector<float>(tri.w0dx * horizontalOffset);
+                w1 += new Vector<float>(tri.w1dx * horizontalOffset);
+                w2 += new Vector<float>(tri.w2dx * horizontalOffset);
 
-                    var w0BaryIncrement = w0ScaledIncrement / area;
-                    var w1BaryIncrement = w1ScaledIncrement / area;
-                    var w2BaryIncrement = w2ScaledIncrement / area;
+                w0Bary += new Vector<float>(tri.w0Barydx * horizontalOffset);
+                w1Bary += new Vector<float>(tri.w1Barydx * horizontalOffset);
+                w2Bary += new Vector<float>(tri.w2Barydx * horizontalOffset);
 
-                    int x;
+                depth += new Vector<float>(tri.depthdx * horizontalOffset);
 
-                    var depth = w0Bary * v0.Z + w1Bary * v1.Z + w2Bary * v2.Z;
+                
+                for (x = xi0; x <= xi1; x+= SIMDcount)
+                {
+                    if (x + SIMDcount >= xi1) { break; }                                        
+                    Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
+                    Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
 
-                    var depthIncrement = w0BaryIncrement * v0.Z + w1BaryIncrement * v1.Z + w2BaryIncrement * v2.Z;
-
-                    //stepped SIMD iterations, runs until a final iteration
-                    for (x = xi0; x <= xi1; x+= SIMDcount)
-                    {
-                        if (x + SIMDcount >= xi1) { break; }
-                        //if (pixelNum > frameBuffer._size) 
-                        //{ 
-                        //    Console.WriteLine($"pixel num is greater in SIMD"); 
-                        //}
-                        Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
-                        Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
-                        
-                        if(!Vector.EqualsAll(depthComp, Vector<int>.Zero))
+                    if (!Vector.EqualsAll(depthComp, Vector<int>.Zero))
                         {
                             var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), 
-                                                                    yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);                            
+                                                                    yVec, depth, w0Bary, w1Bary, w2Bary);                            
                             frameBuffer.SetPixelParallel(x, pixelNum, depthComp, depth, color);
                         }
                         
-                        //Vector<float> writeMaskFloat = Vector.AsVectorSingle(depthComp);
-                        if(EventCounterLog.enabled)
-                        {
-                            int countFrags = 0;
-                            for (int i = 0; i < SIMDcount; i++)
-                            {
-                                if (depthComp[i] == -1) countFrags++;
-                            }
-                            EventCounterLog.Inc("fragments_processed", countFrags);
-                            EventCounterLog.Inc("fragments_visited", SIMDcount);
-                        }
-                        
-                        
-                        pixelNum+= SIMDcount;
-                        xValues += new Vector<float> ( SIMDcount );
-                        w0 += w0ScaledIncrement;
-                        w1 += w1ScaledIncrement;
-                        w2 += w2ScaledIncrement;
-
-                        w0Bary += w0BaryIncrement;
-                        w1Bary += w1BaryIncrement;
-                        w2Bary += w2BaryIncrement;
-
-                        depth += depthIncrement;
-                    }
-
-                    //THIS IS SIGNIFICANTLY SLOWER THAN WHEN IT WAS SIMD...  
-                    //final, scalar iteration
-                    //still need to check whether we are in the right row and right column - in bounds.  problem is
-                    //at this point we've elided that check since the above for loop loops between the correct bounds.
-                    
-                    if(pixelNum >= 0 && pixelNum < frameBuffer._size)                    
+                    //Vector<float> writeMaskFloat = Vector.AsVectorSingle(depthComp);
+                    if(Logger.enabled)
                     {
-                        //this can be optimized as well - don't need to do this by barycentric coords, just whether at end of line
-                        var inside =
-                        Vector.GreaterThanOrEqual(w0, Vector<float>.Zero) &
-                        Vector.GreaterThanOrEqual(w1, Vector<float>.Zero) &
-                        Vector.GreaterThanOrEqual(w2, Vector<float>.Zero);
-
-
-                        if (!Vector.EqualsAll(inside, Vector<int>.Zero))
+                        int countFrags = 0;
+                        for (int i = 0; i < SIMDcount; i++)
                         {
-                            for(int i = 0; i < SIMDcount; i++)
-                            //still need to check whether the depths themselves are all within...                              
-                            //while (x < frameBuffer.width)
-                            {
-                                if (x >= frameBuffer.width)
-                                {
-                                    break;
-                                }                                    
-                                //Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
-                                float depthScalarDest = frameBuffer.depth[pixelNum];
-                                float depthScalarInc = depth.GetElement(i);
-                                bool depthComp = depthScalarInc <= depthScalarDest;
-                                var writeMask = (inside.GetElement(i) == -1) & depthComp;
-
-                                /*
-                                if (!Vector.EqualsAll(writeMask, Vector<int>.Zero))
-                                {
-                                    var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
-                                                                            yVec, depth, w0Bary, w1Bary, w2Bary, triIndex);
-                                    frameBuffer.SetPixelParallel(x, pixelNum, writeMask, depth, color);
-                                }*/
-                                if (writeMask)
-                                {
-                                    var color = pixelShader.Shade(x, y, depthScalarInc, w0.GetElement(i),
-                                                                  w1.GetElement(i), w2.GetElement(i), triIndex);
-                                    frameBuffer.SetPixel(pixelNum, depthScalarInc, color);
-                                }
-
-                                /*
-                                if (EventCounterLog.enabled)
-                                {
-                                    int countFrags = 0;
-                                    for (int i = 0; i < SIMDcount; i++)
-                                    {
-                                        if (writeMask[i] == -1) countFrags++;
-                                    }
-                                    EventCounterLog.Inc("fragments_processed", countFrags);
-                                    EventCounterLog.Inc("fragments_visited", countFrags);
-                                }*/
-                                x++;
-                                pixelNum++;
-                            }
+                            if (depthComp[i] == -1) countFrags++;
                         }
-                        
-
-                        //pixelNum += SIMDcount;
+                        Logger.Inc("fragments_processed", countFrags);
+                        Logger.Inc("fragments_visited", SIMDcount);
                     }
+                        
+                        
+                    pixelNum+= SIMDcount;
+                    xValues += new Vector<float> ( SIMDcount );
+                    w0 += new Vector<float>(tri.w0dx * SIMDcount);
+                    w1 += new Vector<float>(tri.w1dx * SIMDcount);
+                    w2 += new Vector<float>(tri.w2dx * SIMDcount);
+
+                    w0Bary += new Vector<float>(tri.w0Barydx * SIMDcount);
+                    w1Bary += new Vector<float>(tri.w1Barydx * SIMDcount);
+                    w2Bary += new Vector<float>(tri.w2Barydx * SIMDcount);
+
+                    depth += new Vector<float>(tri.depthdx * SIMDcount);
+                }
+                    
+                if(pixelNum >= 0 && pixelNum < frameBuffer._size)                    
+                {                    
+                    //this can be optimized as well - don't need to do this by barycentric coords, just whether at end of line
+                    var inside =
+                    Vector.GreaterThanOrEqual(w0, Vector<float>.Zero) &
+                    Vector.GreaterThanOrEqual(w1, Vector<float>.Zero) &
+                    Vector.GreaterThanOrEqual(w2, Vector<float>.Zero);
+
+                        
+                    if (!Vector.EqualsAll(inside, Vector<int>.Zero))
+                    {
+                        for(int i = 0; i < SIMDcount; i++)
+                        //still need to check whether the depths themselves are all within...                              
+                        //while (x < frameBuffer.width)
+                        {
+                            if (x >= frameBuffer.width)
+                            {
+                                break;
+                            }    
+                            float depthScalarDest = frameBuffer.depth[pixelNum];
+                            float depthScalarInc = depth.GetElement(i);
+                            bool depthComp = depthScalarInc <= depthScalarDest;
+                            var writeMask = (inside.GetElement(i) == -1) & depthComp;
+                                
+                            if (writeMask)
+                            {
+                            var color = pixelShader.Shade(x, y, depthScalarInc, w0.GetElement(i),
+                                                            w1.GetElement(i), w2.GetElement(i));                            
+                                frameBuffer.SetPixel(pixelNum, depthScalarInc, color);                                
+                            }
+
+                            x++;
+                            pixelNum++;
+                        }
+                    }
+                }
+                //increment by Y
+                //THIS NEEDS TO BE UPDATED - WE CAN HAVE A LINE-INITIAL VALUE THAT JUST GETS INCREMENTED
+                w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
+                w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
+                w2 = w2TLBin + new Vector<float>((y - y0) * tri.w2dy);
+
+                //same for bary, depth
+                w0Bary = w0BaryTLBin + new Vector<float>((y - y0) * tri.w0Barydy);
+                w1Bary = w1BaryTLBin + new Vector<float>((y - y0) * tri.w1Barydy);
+                w2Bary = w2BaryTLBin + new Vector<float>((y - y0) * tri.w2Barydy);
+
+                depth = depthTLBin + new Vector<float>((y - y0) * tri.depthdy);
             }                
         }
 
@@ -413,56 +452,28 @@ namespace Software_Renderer
             this.vertexShader = vertexShader;           
         }
 
-        /*
-        public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
-        {
-            for (int i = 0; i < mesh.Triangles.Length; i++)
-            {
-                Triangle tri = mesh.Triangles[i];
 
-                VertexShaderOutput v0 = vertexShader.VertexShade(tri.V0);
-                VertexShaderOutput v1 = vertexShader.VertexShade(tri.V1);
-                VertexShaderOutput v2 = vertexShader.VertexShade(tri.V2);
-
-                v0 = PerspectiveDivide(v0);
-                v1 = PerspectiveDivide(v1);
-                v2 = PerspectiveDivide(v2);
-
-                Vec3 s0 = ViewportTransform(v0.Position);
-                Vec3 s1 = ViewportTransform(v1.Position);
-                Vec3 s2 = ViewportTransform(v2.Position);
-                
-                //store in each touching bin
-
-                //when any bin has 100, set a rasterization flag and start rasterization after this triangle is placed in all its bins
-
-
-                Rasterize(s0, s1, s2, i, width, height, framebuffer);
-            }
-        }
-        */
-
-        public void GetBinCorners(int bx, int by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, 
-                                   FrameBuffer fb)
+        public void GetBinCorners(int bx, int by,           out Vector3 topLeft,        out Vector3 topRight, 
+                                  out Vector3 bottomLeft,   out Vector3 bottomRight,    FrameBuffer fb)
         {
             int tileSize = FrameBuffer.binDimension;
             int tileXmin = bx * tileSize;
             int tileXmax = tileXmin + tileSize - 1;
             int tileYmin = by * tileSize;
             int tileYmax = tileYmin + tileSize - 1;
-            topLeft = new Vec3(tileXmin, tileYmin, 0);
-            bottomLeft = new Vec3(tileXmin, tileYmax, 0);
-            topRight = new Vec3(tileXmax, tileYmin, 0);
-            bottomRight = new Vec3(tileXmax, tileYmax, 0);
+            topLeft = new Vector3(tileXmin, tileYmin, 0);
+            bottomLeft = new Vector3(tileXmin, tileYmax, 0);
+            topRight = new Vector3(tileXmax, tileYmin, 0);
+            bottomRight = new Vector3(tileXmax, tileYmax, 0);
         }
 
         private void FlushBin(int binIndex, FrameBuffer framebuffer, int bx, int by)
         {
             ref Bin bin = ref framebuffer.bins[binIndex];
-            Vec3 binTopLeft;
-            Vec3 binTopRight;
-            Vec3 binBottomLeft;
-            Vec3 binBottomRight;
+            Vector3 binTopLeft;
+            Vector3 binTopRight;
+            Vector3 binBottomLeft;
+            Vector3 binBottomRight;
             GetBinCorners(bx, by, out binTopLeft, out binTopRight, out binBottomLeft, out binBottomRight, framebuffer);            
             for(int i = 0; i < bin.tail; i++)
             {                
@@ -475,11 +486,16 @@ namespace Software_Renderer
                 if (tileTriMinZ > framebuffer.tileMaxDepth[binIndex])
                 {
                     //Console.WriteLine("skipping tile");
+                    //EventCounterLog.Inc("skip");
                     continue;
                 }
-                    
-                Rasterize(tri.s0, tri.s1, tri.s2, triIndex, framebuffer.width, framebuffer.height, framebuffer, 
-                    (uint)binTopLeft.X, (uint)binTopRight.X, (uint)binTopLeft.Y, (uint)binBottomRight.Y);
+                else
+                {
+                    //EventCounterLog.Inc("no-skip");
+                }
+
+                    Rasterize(ref tri, framebuffer,
+                        (uint)binTopLeft.X, (uint)binTopRight.X, (uint)binTopLeft.Y, (uint)binBottomRight.Y);
             }
             bin.Clear();
         }
@@ -487,7 +503,8 @@ namespace Software_Renderer
         public void CalculateBinTriDepths(ref SSTriangle currentTri, int bx, int by, 
                                           FrameBuffer frameBuffer, out float tileTriMinZ, out float tileTriMaxZ)
         {
-            GetBinCorners(bx, by, out Vec3 topLeft, out Vec3 topRight, out Vec3 bottomLeft, out Vec3 bottomRight, frameBuffer);            
+            GetBinCorners(bx, by,   out Vector3 topLeft,        out Vector3 topRight, out Vector3 bottomLeft, 
+                                    out Vector3 bottomRight,    frameBuffer);            
 
             float zTL = currentTri.EvalDepth(topLeft.X, topLeft.Y);
             float zTR = currentTri.EvalDepth(topRight.X, topRight.Y);
@@ -505,14 +522,129 @@ namespace Software_Renderer
             );
         }
 
-        public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
+        //I THINK THERE'S A SORT OF PRECISION BUG IN SOME OF THESE CALCULATIONS
+        //WHAT I MEAN IS THAT THE LEFT MOST X FOR TRIANGLES ARE JUST THE ACTUAL X VALUE OF THE LEFT-MOST VERTEX
+        //BUT THIS CAN BE PROBLEMATIC IF TRYING TO ADD 1 TO THIS VALUE TO GET RELATED VALUES FOR SUBSEQUENT PIXELS
+        //THIS MIGHT BE THE REASON FOR THE RIGHT-MOST 
+        //returns true if triangle accepted, false if triangle rejected
+        public bool TriangleSetup(ref SSTriangle tri)
         {
-            int maxBuffered = bufferedSSTriangles.Length;
+            Vector3 s0 = tri.s0;
+            Vector3 s1 = tri.s1;
+            Vector3 s2 = tri.s2;
+
+            tri.minX = MathF.Min(s0.X, MathF.Min(s1.X, s2.X));
+            tri.maxX = MathF.Max(s0.X, MathF.Max(s1.X, s2.X));
+            tri.minY = MathF.Min(s0.Y, MathF.Min(s1.Y, s2.Y));
+            tri.maxY = MathF.Max(s0.Y, MathF.Max(s1.Y, s2.Y));
+
+            tri.minX = MathF.Max(0, tri.minX);
+            tri.minY = MathF.Max(0, tri.minY);
+            tri.maxX = MathF.Min(width - 1, tri.maxX);
+            tri.maxY = MathF.Min(height - 1, tri.maxY);
+
+            tri.topLeftCoord = new Vector3(tri.minX, tri.minY, 0);
+
+            tri.area = EdgeFunction(s0, s1, s2);
+
+            if (tri.minX > tri.maxX || tri.minY > tri.maxY || tri.area <= 0)
+            {
+                return false;
+            }
+
+            //plane equation, z calcs
+            //but the z's are...  need to check what the code in rasterize() is doing - where is it calculating the min/max for? 
+            //min/max z doesn't have to be top left corner but top left corner is necessary for gradient-based depth calc.
+            //--CALCULATE MAX/MIN DEPTH
+            // --- depth plane coefficients ---
+            // Solve for z = A*x + B*y + C using the three vertices
+            float x0 = s0.X, y0 = s0.Y, z0 = s0.Z;
+            float x1 = s1.X, y1 = s1.Y, z1 = s1.Z;
+            float x2 = s2.X, y2 = s2.Y, z2 = s2.Z;
+
+            // Denominator from the 2D area
+            float denom = x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1);
+
+            // Guard against numerical degeneracy
+            if (MathF.Abs(denom) < 1e-6f)
+            {
+                return false;
+            }
+
+            // A and B come from solving the linear system; C from one vertex
+            tri.A =
+                (z0 * (y1 - y2) + z1 * (y2 - y0) + z2 * (y0 - y1)) / denom;
+
+            tri.B =
+                (z0 * (x2 - x1) + z1 * (x0 - x2) + z2 * (x1 - x0)) / denom;
+
+            tri.C = z0 - tri.A * x0 - tri.B * y0;
+
+            //!!!WHAT PURPOSES DO THESE VALUES SERVE???
+            // Tri-wide depth bounds (not tile-specific, but good for conservative use)
+            tri.minZ = MathF.Min(z0, MathF.Min(z1, z2));
+            tri.maxZ = MathF.Max(z0, MathF.Max(z1, z2));
+            //--END CALCULATE MAX/MIN DEPTH
+
+
+            //all values below are SIMD-wide values, and correspond to 0-SIMDWidth increments in x
+            //these setup vaules are:
+            //depth values (top left "initial" value and x and y gradients)
+            //barycentric coords (top left "initial" value and x and y gradients)
+            //edge equation values (top left "initial" and x and y gradients)
+
+            //Vector<float> SIMDWidth = new Vector<float>(Vector<float>.Count);
+            float SIMDWidth = Vector<float>.Count;
+
+            //edge equation x gradients
+            tri.w0dx = (s2.Y - s1.Y); // = new Vector<float>((s2.Y - s1.Y));// * SIMDWidth);
+            tri.w1dx = (s0.Y - s2.Y); // = new Vector<float>((s0.Y - s2.Y));// * SIMDWidth);
+            tri.w2dx = (s1.Y - s0.Y); // = new Vector<float>((s1.Y - s0.Y));// * SIMDWidth);
+
+            //edge equation y gradients
+            tri.w0dy = s1.X - s2.X;
+            tri.w1dy = s2.X - s0.X;
+            tri.w2dy = s0.X - s1.X;
+
+            //top left edge equation values
+            tri.w0TL = new Vector<float>(EdgeFunction(s1, s2, tri.topLeftCoord)) + Constants.SIMDIncrement * tri.w0dx;
+            tri.w1TL = new Vector<float>(EdgeFunction(s2, s0, tri.topLeftCoord)) + Constants.SIMDIncrement * tri.w1dx;
+            tri.w2TL = new Vector<float>(EdgeFunction(s0, s1, tri.topLeftCoord)) + Constants.SIMDIncrement * tri.w2dx;
+
+            //top left barycentric coords
+            tri.w0BaryTL = tri.w0TL /tri.area;
+            tri.w1BaryTL = tri.w1TL / tri.area;
+            tri.w2BaryTL = tri.w2TL / tri.area;
+
+            //barycentric x gradients        
+            tri.w0Barydx = tri.w0dx / tri.area;
+            tri.w1Barydx = tri.w1dx / tri.area;
+            tri.w2Barydx = tri.w2dx / tri.area;
+
+            //barycentric y gradients        
+            tri.w0Barydy = tri.w0dy / tri.area;
+            tri.w1Barydy = tri.w1dy / tri.area;
+            tri.w2Barydy = tri.w2dy / tri.area;
+
+            //depth gradients
+            tri.depthdx = tri.A;// * SIMDWidth);
+            tri.depthdy = tri.B;
+
+            //top left depth value
+            tri.depthTL = new Vector<float>(tri.EvalDepth(tri.minX, tri.minY)) + Constants.SIMDIncrement * tri.depthdx;
+
+            return true;
+        }
+
+        public void RenderMesh(Mesh mesh, FrameBuffer framebuffer)
+        {            
             int tilesX = framebuffer.binsX;
             int tilesY = framebuffer.binsY;
             int tileW = FrameBuffer.binDimension;
             int tileH = FrameBuffer.binDimension;
 
+            //problem is... we might end up storing more triangles into the buffered[] thing than its sized for
+            //this can happen because we are going through all triangles of a mesh 
             for (int i = 0; i < mesh.Triangles.Length; i++)
             {
                 Triangle tri = mesh.Triangles[i];
@@ -526,89 +658,39 @@ namespace Software_Renderer
                 v1 = PerspectiveDivide(v1);
                 v2 = PerspectiveDivide(v2);
 
-                Vec3 s0 = ViewportTransform(v0.Position);
-                Vec3 s1 = ViewportTransform(v1.Position);
-                Vec3 s2 = ViewportTransform(v2.Position);
+                Vector3 s0 = ViewportTransform(v0.Position);
+                Vector3 s1 = ViewportTransform(v1.Position);
+                Vector3 s2 = ViewportTransform(v2.Position);
 
                 // Store in buffered screen-space triangle buffer
                 int triBufIndex = bufferedTriangleTail;
                 ref SSTriangle currentTri = ref bufferedSSTriangles[triBufIndex];
-                bufferedSSTriangles[triBufIndex].s0 = s0;
-                bufferedSSTriangles[triBufIndex].s1 = s1;
-                bufferedSSTriangles[triBufIndex].s2 = s2;
-
-                //currentTri.
+                currentTri.s0 = s0;
+                currentTri.s1 = s1;
+                currentTri.s2 = s2;                
 
                 bufferedTriangleTail++;
 
-                // Compute screen-space bounds for binning
-                float minX = MathF.Min(s0.X, MathF.Min(s1.X, s2.X));
-                float maxX = MathF.Max(s0.X, MathF.Max(s1.X, s2.X));
-                float minY = MathF.Min(s0.Y, MathF.Min(s1.Y, s2.Y));
-                float maxY = MathF.Max(s0.Y, MathF.Max(s1.Y, s2.Y));
+                bool keepTri = TriangleSetup(ref currentTri);
 
-                // Clip to framebuffer
-                minX = MathF.Max(0, minX);
-                minY = MathF.Max(0, minY);
-                maxX = MathF.Min(width - 1, maxX);
-                maxY = MathF.Min(height - 1, maxY);
-
-                currentTri.area = EdgeFunction(s0, s1, s2);
-
-                // If triangle is completely off-screen, or if it's a back face, skip binning it
-                if (minX > maxX || minY > maxY || currentTri.area <= 0)
-                {
-                    // Optionally roll back bufferedTriangleTail if you want to reuse that slot
-                    bufferedTriangleTail--;
-                    continue;
-                }
-
-                //--CALCULATE MAX/MIN DEPTH
-                // --- depth plane coefficients ---
-                // Solve for z = A*x + B*y + C using the three vertices
-                float x0 = s0.X, y0 = s0.Y, z0 = s0.Z;
-                float x1 = s1.X, y1 = s1.Y, z1 = s1.Z;
-                float x2 = s2.X, y2 = s2.Y, z2 = s2.Z;
-
-                // Denominator from the 2D area
-                float denom = x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1);
-
-                // Guard against numerical degeneracy
-                if (MathF.Abs(denom) < 1e-6f)
+                if(!keepTri)
                 {
                     bufferedTriangleTail--;
                     continue;
-                }
-
-                // A and B come from solving the linear system; C from one vertex
-                currentTri.A =
-                    (z0 * (y1 - y2) + z1 * (y2 - y0) + z2 * (y0 - y1)) / denom;
-
-                currentTri.B =
-                    (z0 * (x2 - x1) + z1 * (x0 - x2) + z2 * (x1 - x0)) / denom;
-
-                currentTri.C = z0 - currentTri.A * x0 - currentTri.B * y0;
-
-                // Tri-wide depth bounds (not tile-specific, but good for conservative use)
-                currentTri.minZ = MathF.Min(z0, MathF.Min(z1, z2));
-                currentTri.maxZ = MathF.Max(z0, MathF.Max(z1, z2));
-                //--END CALCULATE MAX/MIN DEPTH
-
+                }                
 
                 //i'd like to analytically calculate the bin start and bin end
                 // Convert bbox to tile coordinates
-                int binX0 = (int)(minX / tileW);
-                int binX1 = (int)(maxX / tileW);
-                int binY0 = (int)(minY / tileH);
-                int binY1 = (int)(maxY / tileH);
+                int binX0 = (int)(currentTri.minX / tileW);
+                int binX1 = (int)(currentTri.maxX / tileW);
+                int binY0 = (int)(currentTri.minY / tileH);
+                int binY1 = (int)(currentTri.maxY / tileH);
 
                 // Clamp to tile grid
                 if (binX0 < 0) binX0 = 0;
                 if (binY0 < 0) binY0 = 0;
                 if (binX1 >= tilesX) binX1 = tilesX - 1;
                 if (binY1 >= tilesY) binY1 = tilesY - 1;
-                    
-
                     
                 // Put this triangle into all overlapping bins
                 for (int by = binY0; by <= binY1; by++)
@@ -630,37 +712,22 @@ namespace Software_Renderer
 
                         bin.triIndices[bin.tail++] = triBufIndex;
 
-                        if(bufferedTriangleTail >= maxBufferedTriangles)
-                        {
-                            FlushAllBins(framebuffer);
-                        }
                         // If bin is full, flush then reuse it
                         if (bin.tail >= Bin.triangleBufferSize)
                         {
-                            FlushBin(binIndex, framebuffer, bx, by);
+                            FlushAllBins(framebuffer);
                         }
                     }
                 }
-                    
-                
-
-                // If we filled the buffered tri array, flush everything
-                //if (bufferedTriangleTail >= maxBuffered)
-                //{
-                //    FlushAllBins(framebuffer);
-                //}
-
-                // NOTE: For now, the per-triangle Rasterize call is gone; it happens via FlushBin/FlushAllBins.
-                // Old:
-                // Rasterize(s0, s1, s2, i, width, height, framebuffer);
+                if (bufferedTriangleTail >= maxBufferedTriangles)
+                {
+                    FlushAllBins(framebuffer);
+                }                
             }
-
-            // After finishing the mesh, flush any remaining triangles
-            //FlushAllBins(framebuffer);
         }
         private VertexShaderOutput PerspectiveDivide(VertexShaderOutput vertex)
         {
-            return new VertexShaderOutput(new Vec4(
+            return new VertexShaderOutput(new Vector4(
                 vertex.Position.X / vertex.Position.W,
                 vertex.Position.Y / vertex.Position.W,
                 vertex.Position.Z / vertex.Position.W,
@@ -668,43 +735,13 @@ namespace Software_Renderer
             ));
         }
 
-        private Vec3 ViewportTransform(Vec4 ndc)
+        private Vector3 ViewportTransform(Vector4 ndc)
         {
-            return new Vec3(
+            return new Vector3(
                 (ndc.X + 1) * width / 2,
                 (1 - ndc.Y) * height / 2,
                 ndc.Z
             );
         }
     }
-
-    /*
-    internal class SWRenderer
-    {        
-        private int _width, _height;
-
-        public SWRenderer(int width, int height)
-        {
-            _height = height;
-            _width = width;
-        }
-        
-        public void Render(Mesh mesh, FrameBuffer framebuffer)
-        {            
-            uint[] colors = { 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF00F00F, 0xFF0000FF, 0xFF00000F };
-            var pixelShader = new DepthShader(); 
-            var vertexShader = new VertexShader(_width, _height);
-            
-            var pipeline = new RenderingPipeline(_width, _height, pixelShader, vertexShader);
-
-            pipeline.RenderMesh(mesh, framebuffer);
-            
-        }
-
-        public void NewFrame(FrameBuffer fb)
-        {
-
-        }
-    }
-    */
 }

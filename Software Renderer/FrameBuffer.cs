@@ -9,7 +9,7 @@ namespace Software_Renderer
 {
     public struct Bin
     {
-        public const int triangleBufferSize = 100;
+        public const int triangleBufferSize = 10000;
         public int[] triIndices;
         //head is where you read from, tail is where you write to
         public int head = 0, tail = 0;
