@@ -303,19 +303,30 @@ namespace Software_Renderer
                                     + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.depthdx)
                                     + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.depthdy);
 
-            Vector<float> w0 = w0TLBin;
-            Vector<float> w1 = w1TLBin;
-            Vector<float> w2 = w2TLBin;
+            //Vector<float> w0 = w0TLBin;
+            //Vector<float> w1 = w1TLBin;
+            //Vector<float> w2 = w2TLBin;
 
-            Vector<float> w0Bary = w0BaryTLBin;
-            Vector<float> w1Bary = w1BaryTLBin;
-            Vector<float> w2Bary = w2BaryTLBin;
+            //Vector<float> w0Bary = w0BaryTLBin;
+            //Vector<float> w1Bary = w1BaryTLBin;
+            //Vector<float> w2Bary = w2BaryTLBin;
 
-            Vector<float> depth = depthTLBin;
+            //Vector<float> depth = depthTLBin;
 
             for (int y = y0; y <= y1; y++)
-            {       
-                    
+            {
+                Vector<float> w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
+                Vector<float> w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
+                Vector<float> w2 = w2TLBin + new Vector<float>((y - y0) * tri.w2dy);
+
+                //same for bary, depth
+                Vector<float> w0Bary = w0BaryTLBin + new Vector<float>((y - y0) * tri.w0Barydy);
+                Vector<float> w1Bary = w1BaryTLBin + new Vector<float>((y - y0) * tri.w1Barydy);
+                Vector<float> w2Bary = w2BaryTLBin + new Vector<float>((y - y0) * tri.w2Barydy);
+
+                Vector<float> depth = depthTLBin + new Vector<float>((y - y0) * tri.depthdy);
+
+
                 var yVec = new Vector<int>((int)y);
                 float pY = (float)y + 0.5f;
 
@@ -355,7 +366,7 @@ namespace Software_Renderer
                 
                 for (x = xi0; x <= xi1; x+= SIMDcount)
                 {
-                    if (x + SIMDcount >= xi1) { break; }                                        
+                    if (x + SIMDcount > xi1 + 1) { break; }                                        
                     Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                     Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
 
@@ -428,18 +439,7 @@ namespace Software_Renderer
                         }
                     }
                 }
-                //increment by Y
-                //THIS NEEDS TO BE UPDATED - WE CAN HAVE A LINE-INITIAL VALUE THAT JUST GETS INCREMENTED
-                w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
-                w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
-                w2 = w2TLBin + new Vector<float>((y - y0) * tri.w2dy);
-
-                //same for bary, depth
-                w0Bary = w0BaryTLBin + new Vector<float>((y - y0) * tri.w0Barydy);
-                w1Bary = w1BaryTLBin + new Vector<float>((y - y0) * tri.w1Barydy);
-                w2Bary = w2BaryTLBin + new Vector<float>((y - y0) * tri.w2Barydy);
-
-                depth = depthTLBin + new Vector<float>((y - y0) * tri.depthdy);
+                
             }                
         }
 

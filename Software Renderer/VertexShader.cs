@@ -19,12 +19,31 @@ namespace Software_Renderer
         public VertexShader(float width, float height)
         {
             float angle = 0.5f;
-            var model = Matrix4x4.CreateRotationY(angle) * Matrix4x4.CreateRotationX(angle * 0.5f);
-            var view = Matrix4x4.CreateTranslation(0, 0, 0);
-            
-            var projection = Matrix4x4.CreatePerspective(width, height, 0.01f, 100);//((float)Math.PI / 4, width / height, 0.1f, 100f);
-            mvp = projection * view * model;
+            var model = Matrix4x4.CreateRotationY(angle) * Matrix4x4.CreateTranslation(0,0,-3f);
+            var view = Matrix4x4.CreateLookAt(new Vector3(0,0,5), Vector3.Zero, Vector3.UnitY);
+
+            var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, width / height, 0.1f, 1000f);
+            mvp = model * view * projection;
         }
+        
+        public void SetMVP(float width, float height, float angle)
+        {            
+            var model = Matrix4x4.CreateRotationY(angle) * Matrix4x4.CreateTranslation(0, 0, -3f);
+            var view = Matrix4x4.CreateLookAt(new Vector3(0, 0, 5), Vector3.Zero, Vector3.UnitY);
+
+            var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, width / height, 0.1f, 1000f);
+            mvp = model * view * projection;
+        }
+
+        public void SetMVP(float width, float height, float angle, float translation)
+        {
+            var model = Matrix4x4.CreateRotationY(angle) * Matrix4x4.CreateTranslation(0, 0, -3f + translation);
+            var view = Matrix4x4.CreateLookAt(new Vector3(0, 0, 5), Vector3.Zero, Vector3.UnitY);
+
+            var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, width / height, 0.1f, 1000f);
+            mvp = model * view * projection;
+        }
+
 
         //also need normals, albedo.  maybe others.  -- work on this next.
         public VertexShaderOutput VertexShade(Vector3 position)

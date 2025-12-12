@@ -70,30 +70,27 @@ namespace Software_Renderer
                 }
                 long dt = DateTime.Now.Ticks - ticksStart;
                 rotation = (float)dt * rotationRate * rateNormalization;
-                
-                MVP *= Matrix4x4.CreateRotationY(rotation);
-                VS.SetMVP(MVP);
 
-                //renderer.Render(mesh, _fb);
+                VS.SetMVP(width, height, rotation);
+
+                
                 renderer.RenderMesh(mesh, _fb);
 
                 //favorable draw order
 
                 //capture ms, report that...
-                /*
+                
                 renderTime.Start();
                 
-                for(int i = 0; i < 100000; i++)
+                for(int i = 0; i < 1000; i++)
                 {
                     //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
-                    MVP = initialMVP;
-                    MVP *= Matrix4x4.CreateTranslation(0.01f * i, 0, -0.01f * i);
-                    MVP *= Matrix4x4.CreateRotationY(rotation);
-                    VS.SetMVP(MVP);
+                   
+                    VS.SetMVP(width, height, rotation, -0.01f*i);
                     renderer.RenderMesh(mesh, _fb);
                 }
                 Logger.RecordMeasurement(runningAvgLoggerType.wholeFrame, (float)renderTime.ElapsedTicks);
-
+                
                 //Console.WriteLine($"time to render tris: {renderTime.ElapsedMilliseconds} ms");                
                 //averageRenderTime *= renderMeasurements;
                 //renderMeasurements++;
@@ -101,7 +98,7 @@ namespace Software_Renderer
                 //averageRenderTime /= renderMeasurements;                
                 
                 renderTime.Reset();
-                */
+                
                 //unfavorable
                 /*
                 for (int i = 0; i < 1000; i++)
