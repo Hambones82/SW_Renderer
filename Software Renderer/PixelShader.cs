@@ -37,6 +37,7 @@ namespace Software_Renderer
 
         public uint Shade(int x, int y, float depth, float w0, float w1, float w2)
         {
+            //return 0xFF00FFFF;
             return (uint)(depth * (float)(0x0000FFFF)) + 0xFF000000;
             //return 0xFFFFFFFF;
             //return (uint)(depth * 255f) * (uint)0x00010101 + (uint)0xFF000000;
@@ -47,6 +48,7 @@ namespace Software_Renderer
                                           Vector<float> depth, Vector<float> w0,
                                           Vector<float> w1, Vector<float> w2)
         {
+            //return new Vector<uint>(0xFF00FFFF);
             return new Vector<uint>((uint)(0xFF000000)) + Vector.ConvertToUInt32(depth * (float)(0x0000FFFF));            
             //return new Vector<uint>(0xFFFFFFFF);
         }

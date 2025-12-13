@@ -92,6 +92,7 @@ namespace Software_Renderer
             depth[pixelNum] = inDepth;
         }
         
+        //also set coverage mask...
         public void SetPixelParallel(int xStart, int pixelNum, Vector<int> mask, Vector<float> inDepth, Vector<uint> color)
         {            
             int SIMDSize = Vector<float>.Count;

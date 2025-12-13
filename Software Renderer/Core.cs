@@ -40,8 +40,6 @@ namespace Software_Renderer
             Stopwatch FPSReportTimer = Stopwatch.StartNew();
             Stopwatch BackendOutputTimer = Stopwatch.StartNew();
             Stopwatch renderTime = new Stopwatch();
-            int renderMeasurements = 0;
-            float averageRenderTime = 0f;
             var initialMesh = CubeFactory.CreateCube();
             var mesh = initialMesh;
             var initialMVP = VS.GetMVP();    
@@ -58,15 +56,7 @@ namespace Software_Renderer
                     Console.WriteLine($"average render time: {Logger.GetMeasurement(runningAvgLoggerType.wholeFrame)/10f} ns");
                     FPSReportTimer.Restart();
                     frameCount = 0;
-                    Logger.ClearMeasurement(runningAvgLoggerType.wholeFrame);
-                    
-                    //if(EventCounterLog.enabled)
-                    //{
-                        //Console.WriteLine(EventCounterLog.Dump());
-
-                        //EventCounterLog.Clear();
-                    //}
-                    
+                    Logger.ClearMeasurement(runningAvgLoggerType.wholeFrame);                    
                 }
                 long dt = DateTime.Now.Ticks - ticksStart;
                 rotation = (float)dt * rotationRate * rateNormalization;
@@ -76,13 +66,10 @@ namespace Software_Renderer
                 
                 renderer.RenderMesh(mesh, _fb);
 
-                //favorable draw order
-
-                //capture ms, report that...
                 
                 renderTime.Start();
                 
-                for(int i = 0; i < 1000; i++)
+                for(int i = 0; i < 10000; i++)
                 {
                     //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
                    
@@ -90,22 +77,9 @@ namespace Software_Renderer
                     renderer.RenderMesh(mesh, _fb);
                 }
                 Logger.RecordMeasurement(runningAvgLoggerType.wholeFrame, (float)renderTime.ElapsedTicks);
-                
-                //Console.WriteLine($"time to render tris: {renderTime.ElapsedMilliseconds} ms");                
-                //averageRenderTime *= renderMeasurements;
-                //renderMeasurements++;
-                //averageRenderTime += renderTime.ElapsedMilliseconds;
-                //averageRenderTime /= renderMeasurements;                
-                
+                                
                 renderTime.Reset();
                 
-                //unfavorable
-                /*
-                for (int i = 0; i < 1000; i++)
-                {
-                    var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(-0.1f * i, 0, 0.1f * i));
-                    renderer.Render(newMesh, _fb);
-                }*/
                 renderer.NewFrame(_fb);
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)

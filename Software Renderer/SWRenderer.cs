@@ -187,7 +187,6 @@ namespace Software_Renderer
 
             return true;
         }
-
         
         //this is for a bbox corner reject
         //if the edge function for the edge evaluates as <0 for all corners, then the point is not inside the half plane
@@ -202,6 +201,39 @@ namespace Software_Renderer
             //edge function is <0 for all four corners
             return false;
         }
+
+        //passing in top left bary, x, y bary gradients, top left tri x, y, and the x,y's of the corners
+        private bool InsideEdge(float wTL, float wdx, float wdy,
+                    float refX, float refY, float cornerXMin, float cornerYMin,
+                    float cornerXMax, float cornerYMax)
+        {
+            // pick the corner that minimizes w
+            float tx = (wdx >= 0.0f) ? cornerXMin : cornerXMax;
+            float ty = (wdy >= 0.0f) ? cornerYMin : cornerYMax;
+
+            float wMin = wTL
+                + wdx * (tx - refX)
+                + wdy * (ty - refY);
+
+            const float eps = -1e-5f; // small conservative bias
+            return wMin >= eps;
+        }
+
+        bool TileFullyCoveredByTriangle(ref SSTriangle tri,
+                                float x0, float y0, float x1, float y1)
+        {            
+
+            float refX = tri.topLeftCoord.X;
+            float refY = tri.topLeftCoord.Y;
+
+            if (!InsideEdge(tri.w0TL[0], tri.w0dx, tri.w0dy, refX, refY, x0, y0, x1, y1)) return false;
+            if (!InsideEdge(tri.w1TL[0], tri.w1dx, tri.w1dy, refX, refY, x0, y0, x1, y1)) return false;
+            if (!InsideEdge(tri.w2TL[0], tri.w2dx, tri.w2dy, refX, refY, x0, y0, x1, y1)) return false;
+
+            return true; // all three edge half-spaces fully contain the tile
+        }
+
+
 
         private bool TestTriInTile(Vector3 topLeft,     Vector3 topRight,   Vector3 bottomLeft, 
                                    Vector3 bottomRight, ref SSTriangle tri)
@@ -303,16 +335,6 @@ namespace Software_Renderer
                                     + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.depthdx)
                                     + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.depthdy);
 
-            //Vector<float> w0 = w0TLBin;
-            //Vector<float> w1 = w1TLBin;
-            //Vector<float> w2 = w2TLBin;
-
-            //Vector<float> w0Bary = w0BaryTLBin;
-            //Vector<float> w1Bary = w1BaryTLBin;
-            //Vector<float> w2Bary = w2BaryTLBin;
-
-            //Vector<float> depth = depthTLBin;
-
             for (int y = y0; y <= y1; y++)
             {
                 Vector<float> w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
@@ -371,25 +393,12 @@ namespace Software_Renderer
                     Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
 
                     if (!Vector.EqualsAll(depthComp, Vector<int>.Zero))
-                        {
-                            var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), 
-                                                                    yVec, depth, w0Bary, w1Bary, w2Bary);                            
-                            frameBuffer.SetPixelParallel(x, pixelNum, depthComp, depth, color);
-                        }
-                        
-                    //Vector<float> writeMaskFloat = Vector.AsVectorSingle(depthComp);
-                    if(Logger.enabled)
                     {
-                        int countFrags = 0;
-                        for (int i = 0; i < SIMDcount; i++)
-                        {
-                            if (depthComp[i] == -1) countFrags++;
-                        }
-                        Logger.Inc("fragments_processed", countFrags);
-                        Logger.Inc("fragments_visited", SIMDcount);
+                        var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), 
+                                                                yVec, depth, w0Bary, w1Bary, w2Bary);                            
+                        frameBuffer.SetPixelParallel(x, pixelNum, depthComp, depth, color);
                     }
-                        
-                        
+                                               
                     pixelNum+= SIMDcount;
                     xValues += new Vector<float> ( SIMDcount );
                     w0 += new Vector<float>(tri.w0dx * SIMDcount);
@@ -404,40 +413,28 @@ namespace Software_Renderer
                 }
                     
                 if(pixelNum >= 0 && pixelNum < frameBuffer._size)                    
-                {                    
-                    //this can be optimized as well - don't need to do this by barycentric coords, just whether at end of line
-                    var inside =
-                    Vector.GreaterThanOrEqual(w0, Vector<float>.Zero) &
-                    Vector.GreaterThanOrEqual(w1, Vector<float>.Zero) &
-                    Vector.GreaterThanOrEqual(w2, Vector<float>.Zero);
-
-                        
-                    if (!Vector.EqualsAll(inside, Vector<int>.Zero))
+                {                                        
+                    for(int i = 0; i < SIMDcount; i++)                    
                     {
-                        for(int i = 0; i < SIMDcount; i++)
-                        //still need to check whether the depths themselves are all within...                              
-                        //while (x < frameBuffer.width)
+                        if (x >= frameBuffer.width || x>xi1)
                         {
-                            if (x >= frameBuffer.width)
-                            {
-                                break;
-                            }    
-                            float depthScalarDest = frameBuffer.depth[pixelNum];
-                            float depthScalarInc = depth.GetElement(i);
-                            bool depthComp = depthScalarInc <= depthScalarDest;
-                            var writeMask = (inside.GetElement(i) == -1) & depthComp;
+                            break;
+                        }    
+                        float depthScalarDest = frameBuffer.depth[pixelNum];
+                        float depthScalarInc = depth.GetElement(i);
+                        bool depthComp = depthScalarInc <= depthScalarDest;
                                 
-                            if (writeMask)
-                            {
-                            var color = pixelShader.Shade(x, y, depthScalarInc, w0.GetElement(i),
-                                                            w1.GetElement(i), w2.GetElement(i));                            
-                                frameBuffer.SetPixel(pixelNum, depthScalarInc, color);                                
-                            }
-
-                            x++;
-                            pixelNum++;
+                        if (depthComp)
+                        {
+                        var color = pixelShader.Shade(x, y, depthScalarInc, w0.GetElement(i),
+                                                        w1.GetElement(i), w2.GetElement(i));                            
+                            frameBuffer.SetPixel(pixelNum, depthScalarInc, color);                                
                         }
+
+                        x++;
+                        pixelNum++;
                     }
+                    
                 }
                 
             }                
@@ -699,14 +696,32 @@ namespace Software_Renderer
                     {                        
                         int binIndex = by * tilesX + bx;
 
+                        //float tileX0 = bx * tileW;
+                        //float tileY0 = by * tileH;
+                        //float tileX1 = tileX0 + tileW;
+                        //float tileY1 = tileY0 + tileH;
+
+                        // clamp to framebuffer edges if needed
+                        //if (tileX1 > width) tileX1 = width;
+                        //if (tileY1 > height) tileY1 = height;
+
                         CalculateBinTriDepths(ref currentTri, bx, by, framebuffer, out float tileTriMinZ, out float tileTriMaxZ);
 
-                        // Update global per-tile min/max across all tris
-                        framebuffer.tileMinDepth[binIndex] =
-                            MathF.Min(framebuffer.tileMinDepth[binIndex], tileTriMinZ);
+                        //I DONT THINK WE CARE ABT THIS...
+                        //framebuffer.tileMinDepth[binIndex] =
+                        //    MathF.Min(framebuffer.tileMinDepth[binIndex], tileTriMinZ);
 
-                        framebuffer.tileMaxDepth[binIndex] =
-                            MathF.Min(framebuffer.tileMaxDepth[binIndex], tileTriMaxZ);
+                        //this should only be updated if the tile takes up the whole tile area...
+                        //so if covers all...
+                        //i don't think this is a great way of doing things as small triangles aggregated will never fully cover
+                        //a tile
+                        //let's get rid of this for now and try a different approach.
+                        //if(TileFullyCoveredByTriangle(ref currentTri, tileX0, tileY0, tileX1, tileY1))
+                        //{                        
+                            framebuffer.tileMaxDepth[binIndex] =
+                                MathF.Min(framebuffer.tileMaxDepth[binIndex], tileTriMaxZ);
+                        //}
+                        
 
                         ref Bin bin = ref framebuffer.bins[binIndex];
 
