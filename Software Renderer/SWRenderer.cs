@@ -282,8 +282,7 @@ namespace Software_Renderer
             NewFrame(fb);
         }
 
-        //rasterize should get SSTriangle, not the individual vertices.
-        //we can also remove fbwidth and height, which are obtainable from frameBuffer
+        //i think we should align all operations to SIMD-width reads/writes.
         public void Rasterize(ref SSTriangle tri, FrameBuffer frameBuffer, 
                               uint xClipLow = uint.MinValue, uint xClipHigh = uint.MaxValue,
                               uint yClipLow = uint.MinValue, uint yClipHigh = uint.MaxValue)
@@ -365,6 +364,15 @@ namespace Software_Renderer
                     continue;
                 }
 
+                //this just aligns the initial pixel to the SIMD boundary.  
+                //it over-draws in the left direction, though, so we need to mask that out.
+                //we don't need to do it in the simd-tail way, because there's no way the initial set of values will underflow
+                int origxi0 = xi0;
+                int maskedInitialPixels = xi0 % SIMDcount;
+                xi0 -= maskedInitialPixels;
+
+                //instead of this, we want to begin at the SIMD-alignment boundary.  so maybe just adjust xi0 to match that boundary
+                //then just use it as normal.
                 int pixelNum = y * width + xi0;
                 
                 Vector<float> xValues = new Vector<float>(xi0) + Constants.SIMDIncrement;
@@ -385,22 +393,26 @@ namespace Software_Renderer
 
                 depth += new Vector<float>(tri.depthdx * horizontalOffset);
 
-                
-                for (x = xi0; x <= xi1; x+= SIMDcount)
+                Vector<int> initialMask = Vector.GreaterThanOrEqual(Vector<int>.Indices,
+                    new Vector<int>(maskedInitialPixels));//we need a mask that masks out the initial
+
+                const bool renderSIMD = true;                
+                for (x = xi0; x <= xi1; x += SIMDcount)
                 {
-                    if (x + SIMDcount > xi1 + 1) { break; }                                        
+                    if (x + SIMDcount > xi1 + 1) { break; }
                     Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                     Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
-
-                    if (!Vector.EqualsAll(depthComp, Vector<int>.Zero))
+                    Vector<int> mask = depthComp & initialMask;
+                    initialMask = new Vector<int>(-1);
+                    if (!Vector.EqualsAll(depthComp, Vector<int>.Zero) && renderSIMD)
                     {
-                        var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues), 
-                                                                yVec, depth, w0Bary, w1Bary, w2Bary);                            
-                        frameBuffer.SetPixelParallel(x, pixelNum, depthComp, depth, color);
+                        var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
+                                                                yVec, depth, w0Bary, w1Bary, w2Bary);
+                        frameBuffer.SetPixelParallel(x, pixelNum, mask, depth, color);
                     }
-                                               
-                    pixelNum+= SIMDcount;
-                    xValues += new Vector<float> ( SIMDcount );
+
+                    pixelNum += SIMDcount;
+                    xValues += new Vector<float>(SIMDcount);
                     w0 += new Vector<float>(tri.w0dx * SIMDcount);
                     w1 += new Vector<float>(tri.w1dx * SIMDcount);
                     w2 += new Vector<float>(tri.w2dx * SIMDcount);
@@ -411,11 +423,22 @@ namespace Software_Renderer
 
                     depth += new Vector<float>(tri.depthdx * SIMDcount);
                 }
-                    
-                if(pixelNum >= 0 && pixelNum < frameBuffer._size)                    
+                
+                const bool renderScalarTail = true;
+
+                if(pixelNum >= 0 && pixelNum < frameBuffer._size && renderScalarTail)                    
                 {                                        
                     for(int i = 0; i < SIMDcount; i++)                    
                     {
+                        //this if statement is for if the triangle spans entirely within one SIMD width (in which case the initial
+                        //pixels must be masked out
+                        if(x < origxi0)
+                        {
+                            pixelNum++;
+                            x++;
+                            continue;
+                        }
+                        //this if statement is to prevent overflow past the span or the frame buffer width
                         if (x >= frameBuffer.width || x>xi1)
                         {
                             break;

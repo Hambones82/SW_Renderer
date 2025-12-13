@@ -69,7 +69,7 @@ namespace Software_Renderer
                 
                 renderTime.Start();
                 
-                for(int i = 0; i < 10000; i++)
+                for(int i = 0; i < 100000; i++)
                 {
                     //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
                    
