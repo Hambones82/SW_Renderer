@@ -13,7 +13,7 @@ namespace Software_Renderer
     {
         private FrameBuffer _fb;
 
-        private int width = 800, height = 600;
+        private int width = 832, height = 640;
 
         public Core()
         {
@@ -47,6 +47,7 @@ namespace Software_Renderer
             while (loop)
             {
                 Matrix4x4 MVP = initialMVP;
+                _fb.ClearCoverage();
                 _fb.ClearDB();
                 _fb.Fill(0);
                 frameCount++;
@@ -69,7 +70,7 @@ namespace Software_Renderer
                 
                 renderTime.Start();
                 
-                for(int i = 0; i < 100000; i++)
+                for(int i = 0; i < 10000; i++)
                 {
                     //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
                    
@@ -79,8 +80,10 @@ namespace Software_Renderer
                 Logger.RecordMeasurement(runningAvgLoggerType.wholeFrame, (float)renderTime.ElapsedTicks);
                                 
                 renderTime.Reset();
+
                 
                 renderer.NewFrame(_fb);
+                _fb.ValidateFrame();
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
                 {                    

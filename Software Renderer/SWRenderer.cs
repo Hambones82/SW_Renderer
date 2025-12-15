@@ -396,7 +396,7 @@ namespace Software_Renderer
                 Vector<int> initialMask = Vector.GreaterThanOrEqual(Vector<int>.Indices,
                     new Vector<int>(maskedInitialPixels));//we need a mask that masks out the initial
 
-                const bool renderSIMD = true;                
+                const bool renderSIMD = true;
                 for (x = xi0; x <= xi1; x += SIMDcount)
                 {
                     if (x + SIMDcount > xi1 + 1) { break; }
