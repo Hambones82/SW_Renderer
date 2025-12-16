@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Dynamic;
 using System.Linq;
+using System.Numerics;
+using System.Reflection.Metadata.Ecma335;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
-using System.Numerics;
-using System.Diagnostics;
-using System.Reflection.Metadata.Ecma335;
-using System.Dynamic;
-using System.Security.Cryptography.X509Certificates;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Software_Renderer
 {
@@ -56,8 +57,9 @@ namespace Software_Renderer
     }
 
     public struct SSTriangle
-    {
+    {        
         public Vector3 s0, s1, s2;
+        //a property that stores sorted??
         public float area;
 
         // Depth plane: z = A*x + B*y + C
@@ -122,7 +124,18 @@ namespace Software_Renderer
 
         //depth gradients
         public float depthdx;
-        public float depthdy;        
+        public float depthdy;
+
+        //                
+        //       x <--top vert
+        //      /|
+        //     / |
+        //    x <| --- middle vert
+        //     \ |
+        //      \|
+        //       x <-- bottom vert
+        public Vector3 top, middle, bottom;
+        public float dxTopMiddleDy, dxTopBottomDy, dxMiddleBottomDy;
     }
 
     public class RenderingPipeline
@@ -153,6 +166,76 @@ namespace Software_Renderer
                 float t = (y - Ay) / (By - Ay);
                 xs[count++] = a.X + t * (b.X - a.X);
             }
+        }
+
+        public static bool TryGetSpanForScanlineWithSetup(float y, ref SSTriangle tri, out float spanMin, out float spanMax)
+        {
+            var top = tri.top;
+            var middle = tri.middle;
+            var bottom = tri.bottom;
+
+            // Top-inclusive, bottom-exclusive convention: [top.Y, bottom.Y)
+            if (y < top.Y || y >= bottom.Y)
+            {
+                spanMin = spanMax = 0f;
+                return false;
+            }
+
+            float x1, x2;
+
+            if (y < middle.Y)
+            {
+                // --- Top section: edges top->middle and top->bottom ---
+
+                // If top and middle have the same Y, this section is effectively empty
+                if (middle.Y == top.Y)
+                {
+                    spanMin = spanMax = 0f;
+                    return false;
+                }
+
+                float dyFromTop = y - top.Y;
+
+                // x on edge top->middle
+                x1 = top.X + tri.dxTopMiddleDy * dyFromTop;
+
+                // x on edge top->bottom (the long edge)
+                x2 = top.X + tri.dxTopBottomDy * dyFromTop;
+            }
+            else
+            {
+                // --- Bottom section: edges middle->bottom and top->bottom ---
+
+                // If middle and bottom have the same Y, bottom section is empty
+                if (bottom.Y == middle.Y)
+                {
+                    spanMin = spanMax = 0f;
+                    return false;
+                }
+
+                float dyFromMiddle = y - middle.Y;
+                float dyFromTop = y - top.Y;
+
+                // x on edge middle->bottom
+                x1 = middle.X + tri.dxMiddleBottomDy * dyFromMiddle;
+
+                // x on edge top->bottom (still the long edge)
+                x2 = top.X + tri.dxTopBottomDy * dyFromTop;
+            }
+
+            // Sort into [spanMin, spanMax]
+            if (x1 < x2)
+            {
+                spanMin = x1;
+                spanMax = x2;
+            }
+            else
+            {
+                spanMin = x2;
+                spanMax = x1;
+            }
+
+            return true;
         }
 
         public static bool TryGetSpanForScanline(float y, Vector3 v0, Vector3 v1, Vector3 v2,
@@ -334,7 +417,36 @@ namespace Software_Renderer
                                     + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.depthdx)
                                     + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.depthdy);
 
-            for (int y = y0; y <= y1; y++)
+            int xi0, xi1;
+            int y = y0;
+            bool found = false;
+            while (y <= y1)
+            {
+                if (TryGetSpanForScanlineWithSetup(y, ref tri, out float triMin, out float triMax))
+                {
+                    // Clip to tile in X
+                    float clippedMin = MathF.Max(triMin, xClipLow);
+                    float clippedMax = MathF.Min(triMax, xClipHigh);
+
+                    if (clippedMin < clippedMax)
+                    {
+                        // This scanline actually intersects *this tile*.
+                        xi0 = (int)clippedMin;
+                        xi1 = (int)clippedMax;
+                        found = true;
+                        break;
+                    }
+                }
+
+                y++;
+            }
+
+            //if there's no portion of the tri that's within the tile, no need to proceed
+            if (!found) return;
+
+            //the span thing can be further optimized by walking the bounds on a top/bottom division.
+
+            for (; y <= y1; y++)
             {
                 Vector<float> w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
                 Vector<float> w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
@@ -351,10 +463,18 @@ namespace Software_Renderer
                 var yVec = new Vector<int>((int)y);
                 float pY = (float)y + 0.5f;
 
-                int xi0, xi1;
 
-                //might want to elimiate this or just replace it with a "does this tile overlap tri" test
-                if (TryGetSpanForScanline(pY, v0, v1, v2, out float xMin, out float xMax))
+                
+                //these only need to be calculated once per row, not once per bin per row.
+                //problem is though that because of binned architecture...  would have to cache this info somewhere.  bins only
+                //store tri ids...
+                //so we could do a pre-bin setup step...
+
+                //another good reason to do this early is we can know which tiles are fully covered -> 
+                //it's the tiles bewteen beginning and end of span taht also take up all rows
+                //this allows us to optimize the depth/coverage tests (if fully covered, can update, can discard)
+                //maybe we can even do hi-z stuff that early?
+                if (TryGetSpanForScanlineWithSetup(pY, ref tri, out float xMin, out float xMax))
                 {
                     xi0 = Math.Max(x0, (int)Math.Ceiling(xMin));
                     xi1 = Math.Min(x1, (int)Math.Floor(xMax));                        
@@ -424,6 +544,8 @@ namespace Software_Renderer
                     depth += new Vector<float>(tri.depthdx * SIMDcount);
                 }
                 
+                //we don't need a scalar tail if width is divisible by bin dimension (64).
+                //just need to mask the last bits out as with the initial simd.  might get a few % performance here.
                 const bool renderScalarTail = true;
 
                 if(pixelNum >= 0 && pixelNum < frameBuffer._size && renderScalarTail)                    
@@ -652,6 +774,24 @@ namespace Software_Renderer
 
             //top left depth value
             tri.depthTL = new Vector<float>(tri.EvalDepth(tri.minX, tri.minY)) + Constants.SIMDIncrement * tri.depthdx;
+
+            //setting up the triangle span info
+
+            var a = s0;
+            var b = s1;
+            var c = s2;
+
+            if (b.Y < a.Y) (a, b) = (b, a);
+            if (c.Y < a.Y) (a, c) = (c, a);
+            if (c.Y < b.Y) (b, c) = (c, b);
+
+            tri.top = a;
+            tri.middle = b;
+            tri.bottom = c;
+
+            tri.dxTopMiddleDy = (b.Y == a.Y) ? 0f : (b.X - a.X) / (b.Y - a.Y);
+            tri.dxTopBottomDy = (c.Y == a.Y) ? 0f : (c.X - a.X) / (c.Y - a.Y);
+            tri.dxMiddleBottomDy = (c.Y == b.Y) ? 0f : (c.X - b.X) / (c.Y - b.Y);
 
             return true;
         }

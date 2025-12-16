@@ -6,11 +6,13 @@ using System.Numerics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Net.Http.Headers;
 
 namespace Software_Renderer
 {
     internal class Core
     {
+        private const bool validate = false;
         private FrameBuffer _fb;
 
         private int width = 832, height = 640;
@@ -83,7 +85,10 @@ namespace Software_Renderer
 
                 
                 renderer.NewFrame(_fb);
-                _fb.ValidateFrame();
+                if(validate)
+                {
+                    _fb.ValidateFrame();
+                }                
 
                 if (BackendOutputTimer.Elapsed.TotalMilliseconds > BackendInterval)
                 {                    

@@ -1,0 +1,15 @@
+Hierarchical z
+
+we already have coverage.  
+the next thing to do is the hi-z algorithm.
+
+
+
+we want per-bin, per-tri data structure
+
+in an initial pass, we are looking for discards.  
+
+optimizations:
+improve per-tile x-span calculation by walking to y=ymid and then by ymid to ymax, adding appropriate dx
+-- this can get quite complicated...  for now let's leave it as is.  the optimization already brought that test down from ~
+-- 12% cpu utilization to about 3%, so let's focus on other things...
