@@ -71,15 +71,20 @@ namespace Software_Renderer
 
                 
                 renderTime.Start();
-                
-                for(int i = 0; i < 10000; i++)
+
+                const bool renderMultiple = true;
+                if(renderMultiple )
                 {
-                    //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
-                   
-                    VS.SetMVP(width, height, rotation, -0.01f*i);
-                    renderer.RenderMesh(mesh, _fb);
+                    for (int i = 0; i < 100000; i++)
+                    {
+                        //var newMesh = Mesh.Translate(mesh, Matrix4x4.Translation(0.01f*i, 0, -0.01f * i));
+
+                        VS.SetMVP(width, height, rotation, -0.01f * i);
+                        renderer.RenderMesh(mesh, _fb);
+                    }
+                    Logger.RecordMeasurement(runningAvgLoggerType.wholeFrame, (float)renderTime.ElapsedTicks);
                 }
-                Logger.RecordMeasurement(runningAvgLoggerType.wholeFrame, (float)renderTime.ElapsedTicks);
+                
                                 
                 renderTime.Reset();
 

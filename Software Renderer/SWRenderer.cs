@@ -445,26 +445,13 @@ namespace Software_Renderer
             if (!found) return;
 
             //the span thing can be further optimized by walking the bounds on a top/bottom division.
-
+            //can't i just split all triangles into 2 triangles split by the midpoint?  then render first and render second.
+            bool enteredTri = false;
             for (; y <= y1; y++)
-            {
-                Vector<float> w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
-                Vector<float> w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
-                Vector<float> w2 = w2TLBin + new Vector<float>((y - y0) * tri.w2dy);
-
-                //same for bary, depth
-                Vector<float> w0Bary = w0BaryTLBin + new Vector<float>((y - y0) * tri.w0Barydy);
-                Vector<float> w1Bary = w1BaryTLBin + new Vector<float>((y - y0) * tri.w1Barydy);
-                Vector<float> w2Bary = w2BaryTLBin + new Vector<float>((y - y0) * tri.w2Barydy);
-
-                Vector<float> depth = depthTLBin + new Vector<float>((y - y0) * tri.depthdy);
-
-
+            {                
                 var yVec = new Vector<int>((int)y);
                 float pY = (float)y + 0.5f;
 
-
-                
                 //these only need to be calculated once per row, not once per bin per row.
                 //problem is though that because of binned architecture...  would have to cache this info somewhere.  bins only
                 //store tri ids...
@@ -481,8 +468,24 @@ namespace Software_Renderer
                 }
                 else
                 {
+                    //we can do an early exit here.  if we've already rendered any row and there's no more spans, we're definitely
+                    //out of the tri.
+                    if (enteredTri) return;
                     continue;
                 }
+
+                Vector<float> w0 = w0TLBin + new Vector<float>((y - y0) * tri.w0dy);
+                Vector<float> w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
+                Vector<float> w2 = w2TLBin + new Vector<float>((y - y0) * tri.w2dy);
+
+                //same for bary, depth
+                Vector<float> w0Bary = w0BaryTLBin + new Vector<float>((y - y0) * tri.w0Barydy);
+                Vector<float> w1Bary = w1BaryTLBin + new Vector<float>((y - y0) * tri.w1Barydy);
+                Vector<float> w2Bary = w2BaryTLBin + new Vector<float>((y - y0) * tri.w2Barydy);
+
+                Vector<float> depth = depthTLBin + new Vector<float>((y - y0) * tri.depthdy);
+
+
 
                 //this just aligns the initial pixel to the SIMD boundary.  
                 //it over-draws in the left direction, though, so we need to mask that out.
@@ -514,11 +517,12 @@ namespace Software_Renderer
                 depth += new Vector<float>(tri.depthdx * horizontalOffset);
 
                 Vector<int> initialMask = Vector.GreaterThanOrEqual(Vector<int>.Indices,
-                    new Vector<int>(maskedInitialPixels));//we need a mask that masks out the initial
+                    new Vector<int>(maskedInitialPixels));//we need a mask that masks out the left-most pixels
 
                 const bool renderSIMD = true;
                 for (x = xi0; x <= xi1; x += SIMDcount)
                 {
+                    enteredTri = true;
                     if (x + SIMDcount > xi1 + 1) { break; }
                     Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                     Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
@@ -543,45 +547,25 @@ namespace Software_Renderer
 
                     depth += new Vector<float>(tri.depthdx * SIMDcount);
                 }
-                
-                //we don't need a scalar tail if width is divisible by bin dimension (64).
-                //just need to mask the last bits out as with the initial simd.  might get a few % performance here.
-                const bool renderScalarTail = true;
-
-                if(pixelNum >= 0 && pixelNum < frameBuffer._size && renderScalarTail)                    
-                {                                        
-                    for(int i = 0; i < SIMDcount; i++)                    
-                    {
-                        //this if statement is for if the triangle spans entirely within one SIMD width (in which case the initial
-                        //pixels must be masked out
-                        if(x < origxi0)
-                        {
-                            pixelNum++;
-                            x++;
-                            continue;
-                        }
-                        //this if statement is to prevent overflow past the span or the frame buffer width
-                        if (x >= frameBuffer.width || x>xi1)
-                        {
-                            break;
-                        }    
-                        float depthScalarDest = frameBuffer.depth[pixelNum];
-                        float depthScalarInc = depth.GetElement(i);
-                        bool depthComp = depthScalarInc <= depthScalarDest;
-                                
-                        if (depthComp)
-                        {
-                        var color = pixelShader.Shade(x, y, depthScalarInc, w0.GetElement(i),
-                                                        w1.GetElement(i), w2.GetElement(i));                            
-                            frameBuffer.SetPixel(pixelNum, depthScalarInc, color);                                
-                        }
-
-                        x++;
-                        pixelNum++;
-                    }
+                //THIS CAN BE REMOVED AND ABSORBED INTO THE MAIN LOOP
+                //tail --> mask out the final bits.  we could really include this in main loop and have check there.
+                if(x <= xi1)
+                {                    
+                    int maskedFinalPixels = xi1 % SIMDcount;
                     
-                }
-                
+                    Vector<int> lastMask = Vector.LessThanOrEqual(Vector<int>.Indices,
+                        new Vector<int>(maskedFinalPixels));//we need a mask that masks out the right-most pixels
+                                                            //REPLACEMENT FOR SCALAR TAIL
+                    Vector<float> finalStoredDepths = new Vector<float>(frameBuffer.depth, pixelNum);
+                    Vector<int> finalDepthComp = Vector.LessThanOrEqual(depth, finalStoredDepths);
+                    Vector<int> finalMask = finalDepthComp & lastMask & initialMask;                    
+                    if (!Vector.EqualsAll(finalMask, Vector<int>.Zero))
+                    {
+                        var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
+                                                                yVec, depth, w0Bary, w1Bary, w2Bary);
+                        frameBuffer.SetPixelParallel(x, pixelNum, finalMask, depth, color);
+                    }
+                }                
             }                
         }
 

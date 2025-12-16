@@ -9,7 +9,7 @@ namespace Software_Renderer
 {    
     public interface IPixelShader
     {        
-        uint Shade(int x, int y, float depth, float w0, float w1, float w2);
+        //uint Shade(int x, int y, float depth, float w0, float w1, float w2);
         Vector<uint> ParallelShade(Vector<int> x, Vector<int> y,
                                    Vector<float> depth, Vector<float> w0,
                                    Vector<float> w1, Vector<float> w2);
@@ -35,19 +35,25 @@ namespace Software_Renderer
     {
         public DepthShader() {}
 
-        public uint Shade(int x, int y, float depth, float w0, float w1, float w2)
-        {
-            //return 0xFF00FFFF;
-            return (uint)(depth * (float)(0x0000FFFF)) + 0xFF000000;
-            //return 0xFFFFFFFF;
-            //return (uint)(depth * 255f) * (uint)0x00010101 + (uint)0xFF000000;
-
-        }
+        //public uint Shade(int x, int y, float depth, float w0, float w1, float w2)
+        //{
+        //    //return 0xFF00FFFF;
+        //    return (uint)(depth * (float)(0x0000FFFF)) + 0xFF000000;
+        //    //return 0xFFFFFFFF;
+        //    //return (uint)(depth * 255f) * (uint)0x00010101 + (uint)0xFF000000;
+        //
+        //}
 
         public Vector<uint> ParallelShade(Vector<int> x, Vector<int> y,
                                           Vector<float> depth, Vector<float> w0,
                                           Vector<float> w1, Vector<float> w2)
         {
+            //float width = 100f, height = 100f;
+            //uint black = 0;
+            //uint red = 0xFFFF0000;
+            //Vector<float> mask = new Vector<float>(1);
+            //return new Vector<uint>(black) + (Vector.AsVectorUInt32((w0 / width * mask)) ^ 
+            //    Vector.AsVectorUInt32((w1 / height * mask)) * red);
             //return new Vector<uint>(0xFF00FFFF);
             return new Vector<uint>((uint)(0xFF000000)) + Vector.ConvertToUInt32(depth * (float)(0x0000FFFF));            
             //return new Vector<uint>(0xFFFFFFFF);

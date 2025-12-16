@@ -3,6 +3,8 @@ Hierarchical z
 we already have coverage.  
 the next thing to do is the hi-z algorithm.
 
+hi-z:
+do the whole depth updates thing based on fine depth test.
 
 
 we want per-bin, per-tri data structure
@@ -13,3 +15,4 @@ optimizations:
 improve per-tile x-span calculation by walking to y=ymid and then by ymid to ymax, adding appropriate dx
 -- this can get quite complicated...  for now let's leave it as is.  the optimization already brought that test down from ~
 -- 12% cpu utilization to about 3%, so let's focus on other things...
+- can convert the scalar tail into a SIMD write with proper masking and by padding the frame buffer by SIMD width
