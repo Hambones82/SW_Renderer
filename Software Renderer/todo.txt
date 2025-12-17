@@ -2,6 +2,22 @@ Hierarchical z
 
 we already have coverage.  
 the next thing to do is the hi-z algorithm.
+so what was the algo...  
+first we need storage: in each one, a depth represents max for:
+8-wide pixels
+64-wide pixels (tile-row)
+8 rows
+whole tile
+
+each one gets a depth and the element number with the max depth
+
+when we write a depth, update the fine depth buffer.  
+then check upwards:
+	- if you wrote a depth to an element that stored the max value, invalidate the max depth for the next level
+	- propagate this upward
+
+when you start to do work for any given portion, check the closest possible z against the max valid.  if invalid, rescan.
+- if your closest is closer, you need to do an update.  same as above (when write depth, update).
 
 hi-z:
 do the whole depth updates thing based on fine depth test.

@@ -364,8 +364,7 @@ namespace Software_Renderer
         {
             NewFrame(fb);
         }
-
-        //i think we should align all operations to SIMD-width reads/writes.
+        
         public void Rasterize(ref SSTriangle tri, FrameBuffer frameBuffer, 
                               uint xClipLow = uint.MinValue, uint xClipHigh = uint.MaxValue,
                               uint yClipLow = uint.MinValue, uint yClipHigh = uint.MaxValue)

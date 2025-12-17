@@ -163,10 +163,7 @@ namespace Software_Renderer
 
         public void SetPixel(int x, int y, float inDepth, uint color)
         {
-            SetPixel(width * y + x, inDepth, color);
-            //pixels[width * y + x] = color;
-            //depth[width * y + x] = inDepth;
-            //coverage
+            SetPixel(width * y + x, inDepth, color);            
         }
 
         public void SetPixel(int pixelNum, float inDepth, uint color)
@@ -212,6 +209,7 @@ namespace Software_Renderer
                     }
                 }                               
             }
+            //this code might never happen if we have simd-aligned writes
             else
             {
                 for (int i = 0; i < SIMDSize; i++)
@@ -223,9 +221,7 @@ namespace Software_Renderer
                         SetCoverage(pixelNum + i);
                     }
                 }
-            }
-
-                
+            }                
         }
 
         public void Fill(byte a, byte r, byte g, byte b)
