@@ -519,6 +519,7 @@ namespace Software_Renderer
                     new Vector<int>(maskedInitialPixels));//we need a mask that masks out the left-most pixels
 
                 const bool renderSIMD = true;
+                //add a check on the hiz level 0 against min z calculated based on setup.
                 for (x = xi0; x <= xi1; x += SIMDcount)
                 {
                     enteredTri = true;
@@ -526,12 +527,15 @@ namespace Software_Renderer
                     Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                     Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
                     Vector<int> mask = depthComp & initialMask;
+                    //i don't think we should do this here, but rather in fb...  instead, just pass in all calculated
+                    //depths with the "basic" (raster-based) mask
+                    var comboDepths = Vector.ConditionalSelect(mask, depth, storedDepths);
                     initialMask = new Vector<int>(-1);
                     if (!Vector.EqualsAll(depthComp, Vector<int>.Zero) && renderSIMD)
                     {
                         var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
                                                                 yVec, depth, w0Bary, w1Bary, w2Bary);
-                        frameBuffer.SetPixelParallel(x, pixelNum, mask, depth, color);
+                        frameBuffer.SetPixelParallel(x, y, pixelNum, mask, depth, color);
                     }
 
                     pixelNum += SIMDcount;
@@ -562,7 +566,7 @@ namespace Software_Renderer
                     {
                         var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
                                                                 yVec, depth, w0Bary, w1Bary, w2Bary);
-                        frameBuffer.SetPixelParallel(x, pixelNum, finalMask, depth, color);
+                        frameBuffer.SetPixelParallel(x, y, pixelNum, finalMask, depth, color);
                     }
                 }                
             }                

@@ -1,3 +1,7 @@
+- add validation of entire hiz buffer in the validate frame function
+
+
+
 Hierarchical z
 
 we already have coverage.  

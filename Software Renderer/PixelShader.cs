@@ -52,8 +52,10 @@ namespace Software_Renderer
             //uint black = 0;
             //uint red = 0xFFFF0000;
             //Vector<float> mask = new Vector<float>(1);
-            //return new Vector<uint>(black) + (Vector.AsVectorUInt32((w0 / width * mask)) ^ 
-            //    Vector.AsVectorUInt32((w1 / height * mask)) * red);
+            //Vector<uint> w0component = Vector.ConvertToUInt32((w0 * 2f));
+            //Vector<uint> w1component = Vector.ConvertToUInt32((w1 * 2f));
+            //return new Vector<uint>(black) + (w0component ^ 
+            //    w1component) * red;
             //return new Vector<uint>(0xFF00FFFF);
             return new Vector<uint>((uint)(0xFF000000)) + Vector.ConvertToUInt32(depth * (float)(0x0000FFFF));            
             //return new Vector<uint>(0xFFFFFFFF);

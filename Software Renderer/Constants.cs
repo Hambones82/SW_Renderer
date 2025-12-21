@@ -7,9 +7,10 @@ using System.Threading.Tasks;
 
 namespace Software_Renderer
 {
-    internal static class Constants
+    public static class Constants
     {
         public static Vector<float> SIMDIncrement;
+        public static int SIMDCount;
 
         static Constants()
         {
@@ -19,6 +20,7 @@ namespace Software_Renderer
                 values[i] = i;
             }
             SIMDIncrement = new Vector<float>(values);
+            SIMDCount = Vector<float>.Count;
         }
     }
 }

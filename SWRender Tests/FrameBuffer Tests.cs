@@ -330,7 +330,7 @@ namespace SWRender_Tests
         [Fact]
         public void SetPixelParallel_SimdPath_WritesMaskedPixelsDepthAndCoverage()
         {
-            var fb = new FrameBuffer(Vector<float>.Count * 2, 1); // wide enough for SIMD path
+            var fb = new FrameBuffer(128, 64); // wide enough for SIMD path
             fb.ClearDB();
             fb.ClearCoverage();
 
@@ -361,7 +361,7 @@ namespace SWRender_Tests
             var inDepth = new Vector<float>(depthArr);
             var color = new Vector<uint>(colorArr);
 
-            fb.SetPixelParallel(xStart, pixelNum, mask, inDepth, color);
+            fb.SetPixelParallel(xStart, 1, pixelNum, mask, inDepth, color);
 
             // Check pixels & depth
             for (int i = 0; i < simdSize; i++)
@@ -394,63 +394,7 @@ namespace SWRender_Tests
                 bool actualCovered = fb.GetCoverage(pixelNum + i);
                 Assert.Equal(expectedCovered, actualCovered);
             }
-        }
-
-        [Fact]
-        public void SetPixelParallel_FallbackPath_UsesScalarLoop()
-        {
-            int simdSize = Vector<float>.Count;
-            // Width smaller than xStart + SIMDSize triggers fallback
-            var fb = new FrameBuffer(simdSize - 1, 1);
-            fb.ClearDB();
-            fb.ClearCoverage();
-
-            int xStart = 0;
-            int pixelNum = 0;
-
-            for (int i = 0; i < fb._size; i++)
-            {
-                fb.pixels[i] = 0xABABABABu;
-                fb.depth[i] = 99.0f;
-            }
-
-            var maskArr = new int[simdSize];
-            var depthArr = new float[simdSize];
-            var colorArr = new uint[simdSize];
-
-            for (int i = 0; i < simdSize; i++)
-            {
-                maskArr[i] = (i % 2 == 1) ? -1 : 0; // odd lanes active
-                depthArr[i] = i + 10.0f;
-                colorArr[i] = 0xFF000000u + (uint)i;
-            }
-
-            var mask = new Vector<int>(maskArr);
-            var inDepth = new Vector<float>(depthArr);
-            var color = new Vector<uint>(colorArr);
-
-            fb.SetPixelParallel(xStart, pixelNum, mask, inDepth, color);
-
-            for (int i = 0; i < simdSize; i++)
-            {
-                int idx = pixelNum + i;
-                if (idx >= fb._size)
-                    break;
-
-                if (maskArr[i] != 0)
-                {
-                    Assert.Equal(colorArr[i], fb.pixels[idx]);
-                    Assert.Equal(depthArr[i], fb.depth[idx]);
-                    Assert.True(fb.GetCoverage(idx));
-                }
-                else
-                {
-                    Assert.Equal(0xABABABABu, fb.pixels[idx]);
-                    Assert.Equal(99.0f, fb.depth[idx]);
-                    Assert.False(fb.GetCoverage(idx));
-                }
-            }
-        }
+        }       
 
         // ---------- ValidateFrame basic sanity ----------
 

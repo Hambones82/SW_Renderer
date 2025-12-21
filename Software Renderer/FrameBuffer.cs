@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Numerics;
+using System.Reflection.Emit;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -26,12 +27,82 @@ namespace Software_Renderer
         }
     }
 
+    public struct DepthLevel
+    {
+        //reduction must be in powers of 8
+        //e.g., "reduction 1" means divided by 8, "reduction 2" means divided by 64
+        //reduction can be max 2
+        public int reductionX;
+        public int reductionY;
+        public readonly int trueReductionX, trueReductionY;
+        public int numCellsInX;
+        public int numCellsInY;
+        public int sizeInCells;        
+        public int cellSizeY;
+        public float[] depthData;
+        
+        public bool[] validData;
+        //for each chunk, which pixel number stores the max value
+        public int[] subElementIDOfMax;
+        
+        public DepthLevel(int fbWidth, int fbHeight, int inReductionX, int inReductionY)            
+        {
+            Debug.Assert((inReductionX <= 2) && (inReductionX >= 0), "reduction in x must be 0..2");
+            Debug.Assert((inReductionY <= 2) && (inReductionY >= 0), "reduction in y must be 0..2");
+            Debug.Assert(((fbWidth % 64) == 0) && ((fbHeight % 64) == 0), "fb dimensions must be divisible by 64");
+            reductionX = inReductionX;
+            reductionY = inReductionY;
+            trueReductionX = (1 << reductionX * 3);
+            trueReductionY = (1 << reductionY * 3);
+            numCellsInX = fbWidth / trueReductionX;            
+            numCellsInY = fbHeight / trueReductionY;
+            sizeInCells = numCellsInX * numCellsInY;
+            
+            depthData = new float[sizeInCells];
+            Array.Fill(depthData, float.MaxValue);
+            validData = new bool[sizeInCells];
+            Array.Fill(validData, false);
+            subElementIDOfMax = new int[sizeInCells];
+            
+            Array.Fill(subElementIDOfMax, 0);
+            
+        }   
+        public void Reset()
+        {
+            Array.Fill(depthData, float.MaxValue);
+            Array.Fill(validData, false);
+        }
+
+        //if invalidated, return true.  otherwise, return false.
+        public bool LazyUpdate(float depth, int pixelNum)
+        {
+            return false;
+            //determine index for element
+
+            //determine if index is equal to the "highest stored" index
+            //if index is equal to highest stored, set valid to invalid
+            //otherwise, no update
+            //if invalidated, must propagate up, therefore return true
+
+            //if no change, return false
+        }
+
+        //rescan --> a rebuild
+        public void Rescan(int pixelNum) //also level?
+        {
+
+        }
+    }
+
     public class FrameBuffer
     {
         public int width;
         public int height;
         public uint[] pixels;
         public float[] depth;
+        //[0]: 8 pixel wide rows;   [1]: 8x8 tiles
+        //[2]: 8 rows of 64 pixels; [3]: 64x64 tiles
+        public DepthLevel[] hiZBuffer;        
         public Int64[] coverage;//a per-element coverage bitmask
         public Int64[] tileCoverage; //a bitmask, each of whose bits represents one element of ^coverage
                                      //bit is 1 if all are covered, 0 otherwise
@@ -80,6 +151,11 @@ namespace Software_Renderer
             tileMaxDepth = new float[numBins];
             binsX = width / binDimension; 
             binsY = height / binDimension;
+            hiZBuffer = new DepthLevel[4];
+            hiZBuffer[0] = new DepthLevel(width, height, 1, 0);
+            hiZBuffer[1] = new DepthLevel(width, height, 1, 1);
+            hiZBuffer[2] = new DepthLevel(width, height, 2, 1);
+            hiZBuffer[3] = new DepthLevel(width, height, 2, 2);
         }
 
         public void SetPixel(int x, int y, uint color)
@@ -166,34 +242,219 @@ namespace Software_Renderer
             SetPixel(width * y + x, inDepth, color);            
         }
 
+        //let's get rid of this
         public void SetPixel(int pixelNum, float inDepth, uint color)
         {
             pixels[pixelNum] = color;
             depth[pixelNum] = inDepth;
             SetCoverage(pixelNum);
+            UpdateHiZ(inDepth, pixelNum);
+            //DO THE HI-Z UPDATES..
         }
+
+        //probably want to...  just do the SIMD version...
+        public void UpdateHiZ(float depth, int pixelNum)
+        {
+            //single update -- 
+            //but wait...  so...  ok.  we KNOW here that we've already passed the depth test, so we aren't 
+            //doing another one
+            bool updated = false;
+            int level = 0;
+            do
+            {
+                updated = hiZBuffer[level++].LazyUpdate(depth, pixelNum);
+            } while (updated);
+        }
+
+        //reduction in power of 8.
+        private int XScreenToCellCoord(int XScreencoord, int reductionExp8)
+            => XScreencoord >> (3 * reductionExp8);
+
+        private int YScreenToCellCoord(int YScreencoord, int reductionExp8)
+            => YScreencoord >> (3 * reductionExp8);
+
+        private int XCellToFirstScreenCoord(int XCell, int reductionExp8)
+            => XCell << (3 * reductionExp8);
+
+        private int YCellToFirstScreenCoord(int YCell, int reductionExp8)
+            => YCell << (3 * reductionExp8);
         
+        private int CellCoordsToElementNumber(int xCell, int yCell, int levelNum)                             
+            => xCell  + (yCell * hiZBuffer[levelNum].numCellsInX);
+        
+
+        private int GetHiZElementID(int x, int y, int level)
+        {
+            int cellXParent = XScreenToCellCoord(x, hiZBuffer[level].reductionX);
+            int cellYParent = YScreenToCellCoord(y, hiZBuffer[level].reductionY);
+            return hiZBuffer[level].numCellsInX * cellYParent + cellXParent;
+        }
+
+        private void GetHiZElementIDAndLaneID(int x, int y, int parentLevel, out int parentElementID, out int childLaneID)
+        {
+            int reductionXChild = hiZBuffer[parentLevel-1].reductionX;
+            int reductionYChild = hiZBuffer[parentLevel-1].reductionY;
+            int reductionXParent = hiZBuffer[parentLevel].reductionX;
+            int reductionYParent = hiZBuffer[parentLevel].reductionY;
+            int cellXChild = XScreenToCellCoord(x, reductionXChild);
+            int cellYChild = YScreenToCellCoord(y, reductionYChild);
+            int cellXParent = XScreenToCellCoord(x, reductionXParent);
+            int cellYParent = YScreenToCellCoord(y, reductionYParent);
+
+            parentElementID = hiZBuffer[parentLevel].numCellsInX * cellYParent + cellXParent;
+
+            int childCountX = 1 << (3 * (reductionXParent - reductionXChild));
+            int childCountY = 1 << (3 * (reductionYParent - reductionYChild));
+            
+            int localX = (cellXChild & (childCountX-1));
+            int localY = (cellYChild & (childCountY-1));
+
+            childLaneID = localX + localY * childCountX;
+        }
+
+
+        //problem here is...  we are keeping track of LANE ID.  
+        //i think we really want cell x and y of the max...
+        //right now this only works if there is expansion from previous level in only one dimension
+        //this already doesn't work with SIMDCount = 4...
+        public void UpdateHiZSIMD(Vector<float> depthToBeAtDest, Vector<int> depthAndCoverageMask, int startPixelNum,
+                                  int x, int y)
+        {
+            int elementID = GetHiZElementID(x, y, 0);
+            float maxDepth = depthToBeAtDest[0];
+            int maxLaneID = 0;
+            for(int i = 1; i < Constants.SIMDCount; i++)
+            {
+                float candidateMax = depthToBeAtDest[i];
+                if ((candidateMax > maxDepth))
+                {
+                    maxDepth = candidateMax;
+                    maxLaneID = i;
+                }                
+            }
+            hiZBuffer[0].validData[elementID] = true;
+            hiZBuffer[0].depthData[elementID] = maxDepth;
+            hiZBuffer[0].subElementIDOfMax[elementID] = maxLaneID;
+
+            //go UP the hierarchy
+            //at level = 1, if we overwrote the max ID there, we need to invalidate it
+            for(int parentLevel = 1; parentLevel < 4; parentLevel++)
+            {
+                //now use "get element and lane ID" to get those values
+                GetHiZElementIDAndLaneID(x, y, parentLevel, out int parentElementID, out int childLaneID);
+                //check if valid... if not, return
+                if (!hiZBuffer[parentLevel].validData[parentElementID]) return;
+                //if lanes don't match, return
+                if (hiZBuffer[parentLevel].subElementIDOfMax[parentElementID] != childLaneID) return;
+                //if valid, invalidate and move up to the next level                
+                hiZBuffer[parentLevel].validData[parentElementID] = false;                
+            }
+        }               
+
+        private int ElementIDToScreenCoords(int elementID, int level, out int x, out int y)
+        {
+            Debug.Assert(level >= 0 && level < hiZBuffer.Length, "Invalid hiZ level");
+
+            DepthLevel dl = hiZBuffer[level];
+
+            Debug.Assert(elementID >= 0 && elementID < dl.sizeInCells, "elementID out of range");
+
+            int cellX = elementID % dl.numCellsInX;
+            int cellY = elementID / dl.numCellsInX;
+
+            // Top-left pixel of this hi-z cell in screen space
+            x = cellX * dl.trueReductionX;
+            y = cellY * dl.trueReductionY;
+
+            Debug.Assert(x >= 0 && x < width, "Computed x out of framebuffer bounds");
+            Debug.Assert(y >= 0 && y < height, "Computed y out of framebuffer bounds");
+
+            return y * width + x;
+        }
+
+        //
+        public float GetHiZ(int level, int x, int y)
+        {
+            int elementID = GetHiZElementID(x, y, level);
+            if (hiZBuffer[level].validData[elementID])
+            {
+                return hiZBuffer[level].depthData[elementID];
+            }
+            else
+            {
+                //num lanes in level - 1, within one element of level
+                int reductionPow2 = 3 * ((hiZBuffer[level].reductionX - hiZBuffer[level - 1].reductionX) +
+                                    (hiZBuffer[level].reductionY - hiZBuffer[level - 1].reductionY));
+                int numLanesInCell = 1 << reductionPow2;
+                float maxDepth = float.MinValue;
+
+                //HERE WE NEED TO FIX
+                //MAKE USE OF THE ALREADY EXISTING FUNCTION OF GET ELEMENT AND LANE ID
+
+
+                int firstLaneElementID;
+                
+                //iterate through all the corresponding elements of the current cell to find the max
+                //this is not correct because we are mixing LANES and ELEMENT #s
+                
+                for(int i = 0; i < numLanesInCell; i++)
+                {
+                    float laneDepth = float.MinValue;
+                    int elementIDOfLane = firstLaneElementID + i;
+                    
+                    //the next part is wrong... you can't go linearly in the element id space
+                    if (!hiZBuffer[level - 1].validData[firstLaneElementID + i])
+                    {
+                        //wrong... 
+                        int xOfLane;
+                        int yOfLane;
+                        //wrong...
+                        ElementIDToScreenCoords(elementIDOfLane, level - 1, out xOfLane, out yOfLane);
+                        laneDepth = GetHiZ(level - 1, xOfLane, yOfLane);//x, y of firstLaneElementID + i                        
+                    }
+                    else
+                    {
+                        laneDepth = hiZBuffer[level - 1].depthData[elementIDOfLane];                        
+                    }
+                    if (laneDepth > maxDepth)
+                    {
+                        maxDepth = laneDepth;
+                        newLaneOfMax = i;
+                    }
+                }
+                hiZBuffer[level].validData[elementID] = true;
+                hiZBuffer[level].depthData[elementID] = maxDepth;
+                hiZBuffer[level].subElementIDOfMax[elementID] = newLaneOfMax;
+
+                return maxDepth;                
+            }
+        }
+
         //also set coverage mask...
-        public void SetPixelParallel(int xStart, int pixelNum, Vector<int> mask, Vector<float> inDepth, Vector<uint> color)
+        public void SetPixelParallel(int xStart, int y, int pixelNum,
+                                     Vector<int> depthAndCoveragemask, Vector<float> depthAndCoverageMaskedDepth, Vector<uint> color)
         {            
             Debug.Assert((pixelNum % width) == xStart, $"pixelNum/xStart mismatch");
             int SIMDSize = Vector<float>.Count;
             if (pixelNum >= _size) return;            
             if(xStart + SIMDSize <= width)
             {
-                Vector<uint> uIntMask = Vector.AsVectorUInt32(mask);
+                //here we need to calculate a final mask based on 
+                //the depth test...
+
+                Vector<uint> uIntMask = Vector.AsVectorUInt32(depthAndCoveragemask);
                 
                 Vector<uint> destPixels = new Vector<uint>(pixels, pixelNum);
                 var comboPixels = Vector.ConditionalSelect(uIntMask, color, destPixels);
-
+                
                 Vector<float> destDepths = new Vector<float>(depth, pixelNum);
-                var comboDepths = Vector.ConditionalSelect(mask, inDepth, destDepths);
+                var newFBDepths = Vector.ConditionalSelect(depthAndCoveragemask, depthAndCoverageMaskedDepth, destDepths);
 
                 byte coverageMask = 0;
                 for(int i = 0; i < Vector<int>.Count; i++)
                 {
                     coverageMask <<= 1;
-                    coverageMask |= mask[i] == -1 ? (byte)1 : (byte)0;
+                    coverageMask |= depthAndCoveragemask[i] == -1 ? (byte)1 : (byte)0;
                 }
                 SetCoverage8(pixelNum, coverageMask);
 
@@ -205,23 +466,15 @@ namespace Software_Renderer
                     }   
                     fixed(float* _depths = &depth[pixelNum])
                     {
-                        Vector.Store(comboDepths, _depths);
-                    }
-                }                               
-            }
-            //this code might never happen if we have simd-aligned writes
-            else
-            {
-                for (int i = 0; i < SIMDSize; i++)
-                {
-                    if ((xStart + i < width) && (mask.GetElement(i) != 0))
-                    {
-                        pixels[pixelNum + i] = color.GetElement(i);
-                        depth[pixelNum + i] = inDepth.GetElement(i);
-                        SetCoverage(pixelNum + i);
+                        Vector.Store(newFBDepths, _depths);
                     }
                 }
-            }                
+                //DO THE HI-Z UPDATES
+                //here, "mask" already has the depth test encoded in it.
+                //also, we will only get here if there is at least one update...
+
+                UpdateHiZSIMD(newFBDepths, depthAndCoveragemask, pixelNum, xStart, y);
+            }                         
         }
 
         public void Fill(byte a, byte r, byte g, byte b)
