@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 namespace Software_Renderer
 {
+    public record Coord2D(int x, int y);
+
     public struct Bin
     {
         public const int triangleBufferSize = 10000;
@@ -38,12 +40,14 @@ namespace Software_Renderer
         public int numCellsInX;
         public int numCellsInY;
         public int sizeInCells;        
-        public int cellSizeY;
+        
         public float[] depthData;
         
         public bool[] validData;
         //for each chunk, which pixel number stores the max value
-        public int[] subElementIDOfMax;
+        //public int[] subElementIDOfMax;
+        public Coord2D[] cellXYOfMax;
+        
         
         public DepthLevel(int fbWidth, int fbHeight, int inReductionX, int inReductionY)            
         {
@@ -61,37 +65,19 @@ namespace Software_Renderer
             depthData = new float[sizeInCells];
             Array.Fill(depthData, float.MaxValue);
             validData = new bool[sizeInCells];
-            Array.Fill(validData, false);
-            subElementIDOfMax = new int[sizeInCells];
-            
-            Array.Fill(subElementIDOfMax, 0);
-            
+            Array.Fill(validData, true);
+            cellXYOfMax = new Coord2D[sizeInCells];
+            //this just isn't right...
+            Array.Fill(cellXYOfMax, new Coord2D(0,0));            
         }   
+        /*
         public void Reset()
         {
             Array.Fill(depthData, float.MaxValue);
-            Array.Fill(validData, false);
-        }
+            Array.Fill(validData, true);
 
-        //if invalidated, return true.  otherwise, return false.
-        public bool LazyUpdate(float depth, int pixelNum)
-        {
-            return false;
-            //determine index for element
-
-            //determine if index is equal to the "highest stored" index
-            //if index is equal to highest stored, set valid to invalid
-            //otherwise, no update
-            //if invalidated, must propagate up, therefore return true
-
-            //if no change, return false
-        }
-
-        //rescan --> a rebuild
-        public void Rescan(int pixelNum) //also level?
-        {
-
-        }
+            //reset needs to also clear cell xy of max...  
+        }*/
     }
 
     public class FrameBuffer
@@ -120,8 +106,6 @@ namespace Software_Renderer
         public float[] tileMinDepth; // length = numBins
         public float[] tileMaxDepth; // length = numBins
         public Bin[] bins;
-
-        
 
         public void BinXY(int binNum, out int x, out int y)
         {
@@ -156,7 +140,45 @@ namespace Software_Renderer
             hiZBuffer[1] = new DepthLevel(width, height, 1, 1);
             hiZBuffer[2] = new DepthLevel(width, height, 2, 1);
             hiZBuffer[3] = new DepthLevel(width, height, 2, 2);
+            //we should initialize the cellxymax to the first child cell in the parent cell, in child cell xy coords
+            for(int i = 0; i < 4; i++)
+            {
+                InitializeDepthLevelMaxCellXY(i);
+            }
         }
+
+        public void InitializeDepthLevelMaxCellXY(int depthLevel)
+        {
+            Debug.Assert((depthLevel >= 0) && (depthLevel < 4));
+            ref DepthLevel depthBuffer = ref hiZBuffer[depthLevel];
+            int reductionX = 0;
+            int reductionY = 0;
+            if(depthLevel > 0)
+            {
+                reductionX = hiZBuffer[depthLevel - 1].reductionX;
+                reductionY = hiZBuffer[depthLevel - 1].reductionY;
+            }            
+            for (int x = 0; x < depthBuffer.numCellsInX; x++)
+            {
+                for(int y = 0; y < depthBuffer.numCellsInY; y++)
+                {
+                    int levelElementID = x + (y * depthBuffer.numCellsInX);
+                    ElementIDToScreenCoords(levelElementID, depthLevel, out int screenX, out int screenY);
+                    if(depthLevel == 0)
+                    {
+                        depthBuffer.cellXYOfMax[levelElementID] = new Coord2D(screenX, screenY);
+                    }
+                    else
+                    {
+                        int cellX = XScreenToCellCoord(screenX, reductionX);
+                        int cellY = YScreenToCellCoord(screenY, reductionY);
+                        depthBuffer.cellXYOfMax[levelElementID] = new Coord2D(cellX, cellY);
+                    }                    
+                }
+            }
+        }
+
+        //we need a CLEAR FRAME function...
 
         public void SetPixel(int x, int y, uint color)
         {            
@@ -237,59 +259,33 @@ namespace Software_Renderer
             return (tileCoverage[tileNum] == -1);
         }
 
-        public void SetPixel(int x, int y, float inDepth, uint color)
-        {
-            SetPixel(width * y + x, inDepth, color);            
-        }
 
-        //let's get rid of this
-        public void SetPixel(int pixelNum, float inDepth, uint color)
-        {
-            pixels[pixelNum] = color;
-            depth[pixelNum] = inDepth;
-            SetCoverage(pixelNum);
-            UpdateHiZ(inDepth, pixelNum);
-            //DO THE HI-Z UPDATES..
-        }
-
-        //probably want to...  just do the SIMD version...
-        public void UpdateHiZ(float depth, int pixelNum)
-        {
-            //single update -- 
-            //but wait...  so...  ok.  we KNOW here that we've already passed the depth test, so we aren't 
-            //doing another one
-            bool updated = false;
-            int level = 0;
-            do
-            {
-                updated = hiZBuffer[level++].LazyUpdate(depth, pixelNum);
-            } while (updated);
-        }
-
+        //--BEGIN HI-Z HELPER FUNCTIONS--
         //reduction in power of 8.
-        private int XScreenToCellCoord(int XScreencoord, int reductionExp8)
+        public int XScreenToCellCoord(int XScreencoord, int reductionExp8)
             => XScreencoord >> (3 * reductionExp8);
 
-        private int YScreenToCellCoord(int YScreencoord, int reductionExp8)
+        public int YScreenToCellCoord(int YScreencoord, int reductionExp8)
             => YScreencoord >> (3 * reductionExp8);
 
-        private int XCellToFirstScreenCoord(int XCell, int reductionExp8)
+        public int XCellToFirstScreenCoord(int XCell, int reductionExp8)
             => XCell << (3 * reductionExp8);
 
-        private int YCellToFirstScreenCoord(int YCell, int reductionExp8)
+        public int YCellToFirstScreenCoord(int YCell, int reductionExp8)
             => YCell << (3 * reductionExp8);
-        
-        private int CellCoordsToElementNumber(int xCell, int yCell, int levelNum)                             
-            => xCell  + (yCell * hiZBuffer[levelNum].numCellsInX);
-        
 
-        private int GetHiZElementID(int x, int y, int level)
+        public int CellCoordsToElementNumber(int xCell, int yCell, int levelNum)                             
+            => xCell  + (yCell * hiZBuffer[levelNum].numCellsInX);
+
+
+        public int GetHiZElementID(int screenX, int screenY, int level)
         {
-            int cellXParent = XScreenToCellCoord(x, hiZBuffer[level].reductionX);
-            int cellYParent = YScreenToCellCoord(y, hiZBuffer[level].reductionY);
+            int cellXParent = XScreenToCellCoord(screenX, hiZBuffer[level].reductionX);
+            int cellYParent = YScreenToCellCoord(screenY, hiZBuffer[level].reductionY);
             return hiZBuffer[level].numCellsInX * cellYParent + cellXParent;
         }
 
+        /*
         private void GetHiZElementIDAndLaneID(int x, int y, int parentLevel, out int parentElementID, out int childLaneID)
         {
             int reductionXChild = hiZBuffer[parentLevel-1].reductionX;
@@ -310,47 +306,90 @@ namespace Software_Renderer
             int localY = (cellYChild & (childCountY-1));
 
             childLaneID = localX + localY * childCountX;
-        }
-
+        }*/
+        //--END HI-Z HELPER FUNCTIONS--
 
         //problem here is...  we are keeping track of LANE ID.  
         //i think we really want cell x and y of the max...
         //right now this only works if there is expansion from previous level in only one dimension
         //this already doesn't work with SIMDCount = 4...
-        public void UpdateHiZSIMD(Vector<float> depthToBeAtDest, Vector<int> depthAndCoverageMask, int startPixelNum,
-                                  int x, int y)
+
+        //for this function, i think we really need to test it.
+        //must ASSERT that, effectively, x mod 8 is 0...
+        //another assumption is that the incoming depth MUST be <= what's in the db
+        //this is not reflected in an assertion
+        public void UpdateHiZSIMD(Vector<float> depthToBeAtDest, int x, int y)
         {
+            Debug.Assert((x % 8 == 0), "UpdateHiZSIMD must write on SIMD-wide boundaries (e.g., %8 = 0)");
+            //First: if we've changed the max for L0 (SIMD row), then we check if that row 
+            //was the max for the corresponding L1 element.
+            //if so, we need to invalidate the corresponding L1 element because it's max depth is no longer correct.
+            //Thus, we:
+            //1. Store L0's old max
             int elementID = GetHiZElementID(x, y, 0);
-            float maxDepth = depthToBeAtDest[0];
+            float oldMaxDepthL0 = hiZBuffer[0].depthData[elementID];
+            //2. calculate max depth for L0 chunk.
+            
+            float maxDepthL0 = depthToBeAtDest[0];
             int maxLaneID = 0;
             for(int i = 1; i < Constants.SIMDCount; i++)
             {
                 float candidateMax = depthToBeAtDest[i];
-                if ((candidateMax > maxDepth))
+                if ((candidateMax > maxDepthL0))
                 {
-                    maxDepth = candidateMax;
+                    maxDepthL0 = candidateMax;
                     maxLaneID = i;
                 }                
             }
             hiZBuffer[0].validData[elementID] = true;
-            hiZBuffer[0].depthData[elementID] = maxDepth;
-            hiZBuffer[0].subElementIDOfMax[elementID] = maxLaneID;
+            hiZBuffer[0].depthData[elementID] = maxDepthL0;
+            
+            Coord2D childCoords = new Coord2D(x + maxLaneID, y);
+            hiZBuffer[0].cellXYOfMax[elementID] = childCoords;
 
-            //go UP the hierarchy
-            //at level = 1, if we overwrote the max ID there, we need to invalidate it
-            for(int parentLevel = 1; parentLevel < 4; parentLevel++)
+            int childX = XScreenToCellCoord(x, hiZBuffer[0].reductionX);
+            int childY = YScreenToCellCoord(y, hiZBuffer[0].reductionY);
+            childCoords = new Coord2D(childX, childY);
+            
+            int elementIDL1 = GetHiZElementID(x, y, 1);
+            Coord2D maxElementCoordsL1 = hiZBuffer[1].cellXYOfMax[elementIDL1];
+            bool invalidatedLast = false;
+            if ((maxDepthL0 != oldMaxDepthL0) && (maxElementCoordsL1 == childCoords))
             {
-                //now use "get element and lane ID" to get those values
-                GetHiZElementIDAndLaneID(x, y, parentLevel, out int parentElementID, out int childLaneID);
-                //check if valid... if not, return
-                if (!hiZBuffer[parentLevel].validData[parentElementID]) return;
-                //if lanes don't match, return
-                if (hiZBuffer[parentLevel].subElementIDOfMax[parentElementID] != childLaneID) return;
-                //if valid, invalidate and move up to the next level                
-                hiZBuffer[parentLevel].validData[parentElementID] = false;                
+                //if it used to be true, we are invalidating it
+                invalidatedLast = hiZBuffer[1].validData[elementIDL1];
+                hiZBuffer[1].validData[elementIDL1] = false;                
+            }
+            childX = XScreenToCellCoord(x, hiZBuffer[1].reductionX);
+            childY = YScreenToCellCoord(y, hiZBuffer[1].reductionY);
+            childCoords = new Coord2D(childX, childY);
+
+            //If we invalidated the last level
+            //AND
+            //the cell coords of the last level are the same as the stored
+            //cell coords for the element of the current level
+            //THEN
+            //we invalidate the current level            
+            for (int parentLevel = 2; parentLevel <= 3; parentLevel++)
+            {
+                if (!invalidatedLast) break;
+                int parentElementID = GetHiZElementID(x, y, parentLevel);
+                //if the current (parent) level is invalid, we dno't need to do anything else - you can't invalidate a valid element
+                if (!hiZBuffer[parentLevel].validData[parentElementID]) break;
+                
+                if (hiZBuffer[parentLevel].cellXYOfMax[parentElementID] != childCoords) break;                                
+                //if we've invalidated the previous parent, the current parent has valid data, and the previous
+                //parent's cell coords are the same as the max for the current level, then we need to invalidate
+                hiZBuffer[parentLevel].validData[parentElementID] = false;
+                //Finally, we need to set the new child coords for the next loop, which is just the coords of the current element
+                //in the current parent.
+                childX = XScreenToCellCoord(x, hiZBuffer[parentLevel].reductionX);
+                childY = YScreenToCellCoord(y, hiZBuffer[parentLevel].reductionY);
+                childCoords = new Coord2D(childX, childY);
             }
         }               
 
+        //returns the linear element ID
         private int ElementIDToScreenCoords(int elementID, int level, out int x, out int y)
         {
             Debug.Assert(level >= 0 && level < hiZBuffer.Length, "Invalid hiZ level");
@@ -372,64 +411,7 @@ namespace Software_Renderer
             return y * width + x;
         }
 
-        //
-        public float GetHiZ(int level, int x, int y)
-        {
-            int elementID = GetHiZElementID(x, y, level);
-            if (hiZBuffer[level].validData[elementID])
-            {
-                return hiZBuffer[level].depthData[elementID];
-            }
-            else
-            {
-                //num lanes in level - 1, within one element of level
-                int reductionPow2 = 3 * ((hiZBuffer[level].reductionX - hiZBuffer[level - 1].reductionX) +
-                                    (hiZBuffer[level].reductionY - hiZBuffer[level - 1].reductionY));
-                int numLanesInCell = 1 << reductionPow2;
-                float maxDepth = float.MinValue;
-
-                //HERE WE NEED TO FIX
-                //MAKE USE OF THE ALREADY EXISTING FUNCTION OF GET ELEMENT AND LANE ID
-
-
-                int firstLaneElementID;
-                
-                //iterate through all the corresponding elements of the current cell to find the max
-                //this is not correct because we are mixing LANES and ELEMENT #s
-                
-                for(int i = 0; i < numLanesInCell; i++)
-                {
-                    float laneDepth = float.MinValue;
-                    int elementIDOfLane = firstLaneElementID + i;
-                    
-                    //the next part is wrong... you can't go linearly in the element id space
-                    if (!hiZBuffer[level - 1].validData[firstLaneElementID + i])
-                    {
-                        //wrong... 
-                        int xOfLane;
-                        int yOfLane;
-                        //wrong...
-                        ElementIDToScreenCoords(elementIDOfLane, level - 1, out xOfLane, out yOfLane);
-                        laneDepth = GetHiZ(level - 1, xOfLane, yOfLane);//x, y of firstLaneElementID + i                        
-                    }
-                    else
-                    {
-                        laneDepth = hiZBuffer[level - 1].depthData[elementIDOfLane];                        
-                    }
-                    if (laneDepth > maxDepth)
-                    {
-                        maxDepth = laneDepth;
-                        newLaneOfMax = i;
-                    }
-                }
-                hiZBuffer[level].validData[elementID] = true;
-                hiZBuffer[level].depthData[elementID] = maxDepth;
-                hiZBuffer[level].subElementIDOfMax[elementID] = newLaneOfMax;
-
-                return maxDepth;                
-            }
-        }
-
+        
         //also set coverage mask...
         public void SetPixelParallel(int xStart, int y, int pixelNum,
                                      Vector<int> depthAndCoveragemask, Vector<float> depthAndCoverageMaskedDepth, Vector<uint> color)
@@ -473,7 +455,7 @@ namespace Software_Renderer
                 //here, "mask" already has the depth test encoded in it.
                 //also, we will only get here if there is at least one update...
 
-                UpdateHiZSIMD(newFBDepths, depthAndCoveragemask, pixelNum, xStart, y);
+                //UpdateHiZSIMD(newFBDepths, depthAndCoveragemask, pixelNum, xStart, y);
             }                         
         }
 

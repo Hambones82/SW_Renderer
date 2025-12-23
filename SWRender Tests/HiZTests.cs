@@ -1,6 +1,7 @@
 ﻿using Software_Renderer;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using System.Text;
@@ -18,125 +19,6 @@ namespace SWRender_Tests
                 arr[i] = i < values.Length ? values[i] : values[values.Length - 1];
             return new Vector<float>(arr);
         }
-
-        [Fact]
-        public void UpdateHiZSIMD_SetsValidAndOverwrites_WhenElementWasInvalid()
-        {
-            var fb = new FrameBuffer(64, 64);
-
-            int elementID = 0;                 // x=0..SIMD-1, y=0 → first Hi-Z cell
-            int simdSize = Constants.SIMDCount;
-            var depths = new float[simdSize];
-            var maskInts = new int[simdSize];
-
-            // Fill depths with a simple increasing pattern
-            for (int i = 0; i < simdSize; i++)
-            {
-                depths[i] = i + 1.0f;          // 1, 2, 3, ...
-                maskInts[i] = -1;              // mask is currently ignored
-            }
-
-            int expectedMaxLane = simdSize - 1;
-            float expectedMaxDepth = depths[expectedMaxLane];
-
-            // Start with bogus values in hiZBuffer[0]
-            fb.hiZBuffer[0].validData[elementID] = false;
-            fb.hiZBuffer[0].depthData[elementID] = -123.0f;
-            fb.hiZBuffer[0].subElementIDOfMax[elementID] = -1;
-
-            var depthVec = new Vector<float>(depths);
-            var maskVec = new Vector<int>(maskInts);
-
-            // Act
-            fb.UpdateHiZSIMD(depthVec, maskVec, startPixelNum: 0, x: 0, y: 0);
-
-            // Assert: eager update should set valid and overwrite previous values
-            Assert.True(fb.hiZBuffer[0].validData[elementID]);
-            Assert.Equal(expectedMaxDepth, fb.hiZBuffer[0].depthData[elementID]);
-            Assert.Equal(expectedMaxLane, fb.hiZBuffer[0].subElementIDOfMax[elementID]);
-        }
-
-        [Fact]
-        public void UpdateHiZSIMD_OverwritesPreviousHiZData_EvenIfAlreadyValid()
-        {
-            var fb = new FrameBuffer(64, 64);
-
-            int elementID = 0;
-            int simdSize = Constants.SIMDCount;
-            var depths = new float[simdSize];
-            var maskInts = new int[simdSize];
-
-            // Initialize a pattern and then force a known max at some lane
-            for (int i = 0; i < simdSize; i++)
-            {
-                depths[i] = 10.0f + i;
-                maskInts[i] = -1;
-            }
-
-            int expectedMaxLane = simdSize / 2;
-            float expectedMaxDepth = 1000.0f;
-            depths[expectedMaxLane] = expectedMaxDepth;
-
-            var depthVec = new Vector<float>(depths);
-            var maskVec = new Vector<int>(maskInts);
-
-            // Prepopulate hiZBuffer[0] with different "old" values
-            fb.hiZBuffer[0].validData[elementID] = true;
-            fb.hiZBuffer[0].depthData[elementID] = 1.0f;          // old, smaller max
-            fb.hiZBuffer[0].subElementIDOfMax[elementID] = 0;     // old lane
-
-            // Act
-            fb.UpdateHiZSIMD(depthVec, maskVec, startPixelNum: 0, x: 0, y: 0);
-
-            // Assert: new max overwrites old depth and lane; valid is true
-            Assert.True(fb.hiZBuffer[0].validData[elementID]);
-            Assert.Equal(expectedMaxDepth, fb.hiZBuffer[0].depthData[elementID]);
-            Assert.Equal(expectedMaxLane, fb.hiZBuffer[0].subElementIDOfMax[elementID]);
-        }
-
-
-        [Fact]
-        public void UpdateHiZSIMD_EagerUpdate_ComputesMaxDepthAndLane()
-        {
-            // Arrange
-            var fb = new FrameBuffer(64, 64);
-
-            // For x = 0, y = 0, the corresponding level-0 Hi-Z element
-            // will always be index 0 in a row-major layout.
-            int elementID = 0;
-
-            int simdSize = Constants.SIMDCount;
-            var depths = new float[simdSize];
-            var maskInts = new int[simdSize];
-
-            // Fill depths with a known pattern, pick a clear max lane
-            for (int i = 0; i < simdSize; i++)
-            {
-                depths[i] = i + 1.0f;   // 1, 2, 3, ...
-                maskInts[i] = -1;       // all lanes "written" (mask not actually used anymore)
-            }
-
-            int expectedMaxLane = simdSize / 2;
-            float expectedMaxDepth = 100.0f;
-            depths[expectedMaxLane] = expectedMaxDepth;
-
-            var depthVec = new Vector<float>(depths);
-            var maskVec = new Vector<int>(maskInts);
-
-            // Sanity: start with some different values in hiZBuffer[0]
-            fb.hiZBuffer[0].validData[elementID] = false;
-            fb.hiZBuffer[0].depthData[elementID] = -1.0f;
-            fb.hiZBuffer[0].subElementIDOfMax[elementID] = -1;
-
-            // Act
-            fb.UpdateHiZSIMD(depthVec, maskVec, startPixelNum: 0, x: 0, y: 0);
-
-            // Assert: eager update should set valid, depth, and lane-of-max
-            Assert.True(fb.hiZBuffer[0].validData[elementID]);
-            Assert.Equal(expectedMaxDepth, fb.hiZBuffer[0].depthData[elementID]);
-            Assert.Equal(expectedMaxLane, fb.hiZBuffer[0].subElementIDOfMax[elementID]);
-        }
-
 
 
         [Fact]
@@ -162,7 +44,7 @@ namespace SWRender_Tests
 
             Assert.NotNull(level.validData);
             Assert.Equal(cellCount, level.validData.Length);
-            Assert.All(level.validData, v => Assert.False(v));
+            Assert.All(level.validData, v => Assert.True(v));
         }
 
         [Fact]
@@ -188,7 +70,7 @@ namespace SWRender_Tests
 
             Assert.NotNull(level.validData);
             Assert.Equal(cellCount, level.validData.Length);
-            Assert.All(level.validData, v => Assert.False(v));
+            Assert.All(level.validData, v => Assert.True(v));
         }
 
         [Fact]
@@ -215,7 +97,7 @@ namespace SWRender_Tests
 
             Assert.NotNull(level.validData);
             Assert.Single(level.validData);
-            Assert.False(level.validData[0]);
+            Assert.True(level.validData[0]);
         }
 
         [Fact]
@@ -230,8 +112,8 @@ namespace SWRender_Tests
             Assert.Equal(1, level.reductionX);
             Assert.Equal(2, level.reductionY);
 
-            // trueReductionX = 8 → 128 / 8 = 16
-            // trueReductionY = 64 → 64 / 64 = 1
+            // trueReductionX = 8 -> 128 / 8 = 16
+            // trueReductionY = 64 -> 64 / 64 = 1
             Assert.Equal(16, level.numCellsInX);
             Assert.Equal(1, level.numCellsInY);
 
@@ -244,7 +126,7 @@ namespace SWRender_Tests
 
             Assert.NotNull(level.validData);
             Assert.Equal(cellCount, level.validData.Length);
-            Assert.All(level.validData, v => Assert.False(v));
+            Assert.All(level.validData, v => Assert.True(v));
         }
 
         [Theory]
@@ -273,126 +155,241 @@ namespace SWRender_Tests
         }
 
         [Fact]
-        public void UpdateHiZSIMD_Level0_StoresMaxDepthAndLane()
+        public void TestLowestLevelHiZWritesToEmpty_FirstParentCell()
         {
-            var fb = new FrameBuffer(64, 64);
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, 0, 0);
+            
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
+            Debug.Assert(testingLevel.cellXYOfMax[0] == new Coord2D(7, 0));
+            Debug.Assert(testingLevel.validData[0] == true);
+            Debug.Assert(testingLevel.depthData[0] == 0.7f);
 
-            int x = 0, y = 0;
-            int startPixelNum = 0;       // elementID = startPixelNum >> 3 = 0
-
-            // Max is 9.0 at lane 2
-            var depths = V(1f, 2f, 9f, 3f, 4f, 5f, 6f, 7f);
-            var mask = Vector<int>.AllBitsSet;
-
-            fb.UpdateHiZSIMD(depths, mask, startPixelNum, x, y);
-
-            int elementID = startPixelNum >> 3;
-
-            Assert.True(fb.hiZBuffer[0].validData[elementID]);
-            Assert.Equal(9f, fb.hiZBuffer[0].depthData[elementID], 6);
-            Assert.Equal(2, fb.hiZBuffer[0].subElementIDOfMax[elementID]);
         }
 
-        [Fact]
-        public void UpdateHiZSIMD_DoesNotInvalidateParents_WhenParentNotValid()
+        [Theory]
+        [InlineData(64, 128)]
+        [InlineData(80, 136)]
+        [InlineData(88, 192)]
+        public void TestLowestLevelHiZWritesToEmpty_NthParentCell(int screenX, int screenY)
         {
-            var fb = new FrameBuffer(64, 64);
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
+            
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
 
-            int x = 0, y = 0;
-            int startPixelNum = 0;
-
-            // Mark level2 and level3 as valid so we can verify they don't get touched.
-            fb.hiZBuffer[2].validData[0] = true;
-            fb.hiZBuffer[3].validData[0] = true;
-
-            // Parent (level1) is invalid -> function should return immediately at parentLevel=1.
-            fb.hiZBuffer[1].validData[0] = false;
-
-            fb.UpdateHiZSIMD(V(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f), Vector<int>.AllBitsSet, startPixelNum, x, y);
-
-            // Level1 remains invalid; higher levels unchanged.
-            Assert.False(fb.hiZBuffer[1].validData[0]);
-            Assert.True(fb.hiZBuffer[2].validData[0]);
-            Assert.True(fb.hiZBuffer[3].validData[0]);
+            int elementID = fb.GetHiZElementID(screenX, screenY, 0);
+            Debug.Assert(testingLevel.cellXYOfMax[elementID] == new Coord2D(screenX + 7, screenY));
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.depthData[elementID] == 0.7f);
+            Debug.Assert(testingLevel.depthData[(elementID + 1) % testingLevel.sizeInCells] == float.MaxValue);
         }
 
-        [Fact]
-        public void UpdateHiZSIMD_DoesNotInvalidateParents_WhenLaneDoesNotMatch()
+        [Theory]
+        [InlineData(64, 128)]
+        [InlineData(80, 136)]
+        [InlineData(88, 192)]
+        public void TestLowestLevelHiOverwrites_NthParentCell(int screenX, int screenY)
         {
-            var fb = new FrameBuffer(64, 64);
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
+            //
+            for(int i = 0; i < Constants.SIMDCount; i++)
+            {
+                depthValues[i] = 0.05f * i;
+            }
+            depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
+            
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
 
-            int x = 0, y = 0;
-            int startPixelNum = 0;
+            int elementID = fb.GetHiZElementID(screenX, screenY, 0);
+            Debug.Assert(testingLevel.cellXYOfMax[elementID] == new Coord2D(screenX+7, screenY));
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.depthData[elementID] == 0.35f);
+            Debug.Assert(testingLevel.depthData[(elementID + 1) % testingLevel.sizeInCells] == float.MaxValue);
+        }
+        
+        [Theory]
+        [InlineData(64, 128)]
+        [InlineData(80, 136)]
+        [InlineData(88, 192)]
+        public void TestNoInvalidationsInHigherLevels(int screenX, int screenY)
+        {
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
+            
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[1];
+            int elementID = fb.GetHiZElementID(screenX, screenY, 1);            
+            Debug.Assert(testingLevel.validData[elementID] == true);//actaully these will all remain valid...
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            // For x=0,y=0: parentLevel=1 -> parentElementID=0 and childLaneID=0.
-            // Set level1 valid but with mismatching subElementIDOfMax.
-            fb.hiZBuffer[1].validData[0] = true;
-            fb.hiZBuffer[1].subElementIDOfMax[0] = 7; // mismatch (expected 0)
+            testingLevel = ref fb.hiZBuffer[2];
+            elementID = fb.GetHiZElementID(screenX, screenY, 2);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            // Also set higher levels valid; should remain valid because we return on mismatch.
-            fb.hiZBuffer[2].validData[0] = true;
-            fb.hiZBuffer[3].validData[0] = true;
+            testingLevel = ref fb.hiZBuffer[3];
+            elementID = fb.GetHiZElementID(screenX, screenY, 3);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
+        }
+        
+        [Theory]
+        [InlineData(0, 0)]      //first of all levels - all should be invalidated
+        [InlineData(64, 0)]     //same
+        [InlineData(64, 64)]    //same
+        public void TestL1L2L3Invalid(int screenX, int screenY)
+        {
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
 
-            fb.UpdateHiZSIMD(V(8f, 1f, 2f, 3f, 4f, 5f, 6f, 7f), Vector<int>.AllBitsSet, startPixelNum, x, y);
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[1];
+            int elementID = fb.GetHiZElementID(screenX, screenY, 1);
+            Debug.Assert(testingLevel.validData[elementID] == false);//actaully these will all remain valid...
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            Assert.True(fb.hiZBuffer[1].validData[0]); // not invalidated
-            Assert.True(fb.hiZBuffer[2].validData[0]); // unchanged
-            Assert.True(fb.hiZBuffer[3].validData[0]); // unchanged
+            testingLevel = ref fb.hiZBuffer[2];
+            elementID = fb.GetHiZElementID(screenX, screenY, 2);
+            Debug.Assert(testingLevel.validData[elementID] == false);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
+
+            testingLevel = ref fb.hiZBuffer[3];
+            elementID = fb.GetHiZElementID(screenX, screenY, 3);
+            Debug.Assert(testingLevel.validData[elementID] == false);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
         }
 
-        [Fact]
-        public void UpdateHiZSIMD_InvalidatesAllParents_WhenValidAndLaneMatches()
+
+        [Theory]
+        [InlineData(0, 8)]      //first of all levels - all should be invalidated
+        [InlineData(64, 8)]     //same
+        [InlineData(64, 72)]    //same
+        public void TestL1L2InvalidL3Valid(int screenX, int screenY)
         {
-            var fb = new FrameBuffer(64, 64);
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
 
-            int x = 0, y = 0;
-            int startPixelNum = 0;
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[1];
+            int elementID = fb.GetHiZElementID(screenX, screenY, 1);
+            Debug.Assert(testingLevel.validData[elementID] == false);//actaully these will all remain valid...
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            // For x=0,y=0:
-            // parentLevel=1: parentElementID=0, childLaneID=0
-            // parentLevel=2: parentElementID=(y>>3)=0, childLaneID=(x>>3)%8=0
-            // parentLevel=3: parentElementID=0, childLaneID=(y>>6)%8=0
-            fb.hiZBuffer[1].validData[0] = true;
-            fb.hiZBuffer[1].subElementIDOfMax[0] = 0;
+            testingLevel = ref fb.hiZBuffer[2];
+            elementID = fb.GetHiZElementID(screenX, screenY, 2);
+            Debug.Assert(testingLevel.validData[elementID] == false);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            fb.hiZBuffer[2].validData[0] = true;
-            fb.hiZBuffer[2].subElementIDOfMax[0] = 0;
-
-            fb.hiZBuffer[3].validData[0] = true;
-            fb.hiZBuffer[3].subElementIDOfMax[0] = 0;
-
-            fb.UpdateHiZSIMD(V(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f), Vector<int>.AllBitsSet, startPixelNum, x, y);
-
-            Assert.False(fb.hiZBuffer[1].validData[0]);
-            Assert.False(fb.hiZBuffer[2].validData[0]);
-            Assert.False(fb.hiZBuffer[3].validData[0]);
+            testingLevel = ref fb.hiZBuffer[3];
+            elementID = fb.GetHiZElementID(screenX, screenY, 3);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
         }
 
-        [Fact]
-        public void UpdateHiZSIMD_InvalidationStopsAtFirstMismatch_LeavingHigherParentsValid()
+        [Theory]
+        [InlineData(8, 8)]      //first of all levels - all should be invalidated
+        [InlineData(72, 8)]     //same
+        [InlineData(72, 72)]    //same
+        public void TestL1InvalidL2L3Valid(int screenX, int screenY)
         {
-            var fb = new FrameBuffer(64, 64);
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
+            
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[1];
+            int elementID = fb.GetHiZElementID(screenX, screenY, 1);
+            Debug.Assert(testingLevel.validData[elementID] == false);//actaully these will all remain valid...
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            int x = 0, y = 0;
-            int startPixelNum = 0;
+            testingLevel = ref fb.hiZBuffer[2];
+            elementID = fb.GetHiZElementID(screenX, screenY, 2);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            // Level1 matches -> should be invalidated.
-            fb.hiZBuffer[1].validData[0] = true;
-            fb.hiZBuffer[1].subElementIDOfMax[0] = 0;
+            testingLevel = ref fb.hiZBuffer[3];
+            elementID = fb.GetHiZElementID(screenX, screenY, 3);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
+        }
+        
+        [Theory]
+        [InlineData(8, 10)]      //first of all levels - all should be invalidated
+        [InlineData(72, 10)]     //same
+        [InlineData(72, 74)]    //same
+        public void TestL1L2L3Valid(int screenX, int screenY)
+        {
+            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
+            for (int i = 0; i < Constants.SIMDCount; i++)
+            {
+                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
+                depthValues[i] = i * 0.1f;
+            }
+            Vector<float> depths = new Vector<float>(depthValues);
+            fb.UpdateHiZSIMD(depths, screenX, screenY);
 
-            // Level2 mismatches -> should NOT be invalidated, and we should stop there.
-            fb.hiZBuffer[2].validData[0] = true;
-            fb.hiZBuffer[2].subElementIDOfMax[0] = 3; // mismatch (expected 0)
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[1];
+            int elementID = fb.GetHiZElementID(screenX, screenY, 1);
+            Debug.Assert(testingLevel.validData[elementID] == true);//actaully these will all remain valid...
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            // Level3 should remain valid (because we stop at level2 mismatch).
-            fb.hiZBuffer[3].validData[0] = true;
-            fb.hiZBuffer[3].subElementIDOfMax[0] = 0;
+            testingLevel = ref fb.hiZBuffer[2];
+            elementID = fb.GetHiZElementID(screenX, screenY, 2);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
 
-            fb.UpdateHiZSIMD(V(8f, 7f, 6f, 5f, 4f, 3f, 2f, 1f), Vector<int>.AllBitsSet, startPixelNum, x, y);
-
-            Assert.False(fb.hiZBuffer[1].validData[0]); // invalidated
-            Assert.True(fb.hiZBuffer[2].validData[0]);  // unchanged
-            Assert.True(fb.hiZBuffer[3].validData[0]);  // unchanged
+            testingLevel = ref fb.hiZBuffer[3];
+            elementID = fb.GetHiZElementID(screenX, screenY, 3);
+            Debug.Assert(testingLevel.validData[elementID] == true);
+            Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
         }
     }
 }

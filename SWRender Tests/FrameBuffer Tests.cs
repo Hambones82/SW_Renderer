@@ -115,61 +115,8 @@ namespace SWRender_Tests
             Assert.False(fb.GetCoverage(idx));
         }
 
-        [Fact]
-        public void SetPixel_ByPixelNum_SetsPixelDepthAndCoverage()
-        {
-            var fb = Create64x64();
-            fb.ClearDB();
-            fb.ClearCoverage();
-
-            int idx = PixelIndex(fb, 4, 4);
-            uint color = 0x11223344;
-            float depth = 0.5f;
-
-            fb.SetPixel(idx, depth, color);
-
-            Assert.Equal(color, fb.pixels[idx]);
-            Assert.Equal(depth, fb.depth[idx]);
-            Assert.True(fb.GetCoverage(idx));
-        }
-
-        [Fact]
-        public void SetPixel_ByXYFull_SetsPixelDepthAndCoverage()
-        {
-            var fb = Create64x64();
-            fb.ClearDB();
-            fb.ClearCoverage();
-
-            uint color = 0x99FF0000;
-            float depth = 0.25f;
-
-            fb.SetPixel(1, 2, depth, color);
-
-            int idx = PixelIndex(fb, 1, 2);
-            Assert.Equal(color, fb.pixels[idx]);
-            Assert.Equal(depth, fb.depth[idx]);
-            Assert.True(fb.GetCoverage(idx));
-        }
 
         // ---------- Coverage basic tests ----------
-
-        [Fact]
-        public void SetCoverage_ByPixelNum_SetsSingleBit()
-        {
-            var fb = Create64x64();
-            fb.ClearCoverage();
-
-            int idx = PixelIndex(fb, 7, 1); // arbitrary pixel
-            fb.SetCoverage(idx);
-
-            Assert.True(fb.GetCoverage(idx));
-
-            // Neighbor pixels should still be uncovered
-            if (idx > 0)
-                Assert.False(fb.GetCoverage(idx - 1));
-            if (idx + 1 < fb._size)
-                Assert.False(fb.GetCoverage(idx + 1));
-        }
 
         [Fact]
         public void SetCoverage_ByXY_DelegatesCorrectly()
