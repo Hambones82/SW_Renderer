@@ -498,6 +498,9 @@ namespace SWRender_Tests
             Debug.Assert(fb.GetHiZ(2, L2CellX, L2CellY) == 0.6f);
             Debug.Assert(fb.GetHiZ(3, L3CellX, L3CellY) == 0.6f);
         }
+
+        //I think we need to test different depths (e.g., not just .6), and invalidation and subsequent "fetch" of correct depth
+        //values.
     }
 }
 

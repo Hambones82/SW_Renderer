@@ -609,10 +609,10 @@ namespace Software_Renderer
                 int triIndex = bin.triIndices[i];
                 ref SSTriangle tri = ref bufferedSSTriangles[triIndex];
                 CalculateBinTriDepths(ref tri, bx, by, framebuffer, out float tileTriMinZ, out float tileTriMaxZ);
-                
-                //very confused...  first of all why is it greater than tile min depth...
-                //i think we really want like...  the minimum high depth seen for that tile
-                if (tileTriMinZ > framebuffer.tileMaxDepth[binIndex])
+
+                //This is the one line that is wrong.  What we need is to check against our Hi-Z.
+                float tileMaxDepth = framebuffer.GetHiZ(3, bx, by);
+                if (tileTriMinZ > tileMaxDepth)
                 {
                     //Console.WriteLine("skipping tile");
                     //EventCounterLog.Inc("skip");
@@ -629,6 +629,7 @@ namespace Software_Renderer
             bin.Clear();
         }
 
+        //calculates min and max depth for an SSTriangle
         public void CalculateBinTriDepths(ref SSTriangle currentTri, int bx, int by, 
                                           FrameBuffer frameBuffer, out float tileTriMinZ, out float tileTriMaxZ)
         {
@@ -846,31 +847,17 @@ namespace Software_Renderer
                     {                        
                         int binIndex = by * tilesX + bx;
 
-                        //float tileX0 = bx * tileW;
-                        //float tileY0 = by * tileH;
-                        //float tileX1 = tileX0 + tileW;
-                        //float tileY1 = tileY0 + tileH;
+                        
+                        //what does this do?  does it calculate the lowest possible depth for a tri and place it into SSTri?
+                        //CalculateBinTriDepths(ref currentTri, bx, by, framebuffer, out float tileTriMinZ, out float tileTriMaxZ);
 
-                        // clamp to framebuffer edges if needed
-                        //if (tileX1 > width) tileX1 = width;
-                        //if (tileY1 > height) tileY1 = height;
-
-                        CalculateBinTriDepths(ref currentTri, bx, by, framebuffer, out float tileTriMinZ, out float tileTriMaxZ);
-
-                        //I DONT THINK WE CARE ABT THIS...
-                        //framebuffer.tileMinDepth[binIndex] =
-                        //    MathF.Min(framebuffer.tileMinDepth[binIndex], tileTriMinZ);
-
-                        //this should only be updated if the tile takes up the whole tile area...
-                        //so if covers all...
-                        //i don't think this is a great way of doing things as small triangles aggregated will never fully cover
-                        //a tile
-                        //let's get rid of this for now and try a different approach.
-                        //if(TileFullyCoveredByTriangle(ref currentTri, tileX0, tileY0, tileX1, tileY1))
-                        //{                        
-                            framebuffer.tileMaxDepth[binIndex] =
-                                MathF.Min(framebuffer.tileMaxDepth[binIndex], tileTriMaxZ);
-                        //}
+                        //We probably want to get rid of this -> it does not properly calculate the max tile depth
+                        //because a triangle can partially cover a tile.
+                        //This line just updates tileMaxDepth at a bin to be equal to the minimum of the already experienced 
+                        //max depth in that bin and the max depth of this incoming triangle.
+                        //Again, this is wrong because tris may not entirely cover a tile.
+                        //framebuffer.tileMaxDepth[binIndex] = MathF.Min(framebuffer.tileMaxDepth[binIndex], tileTriMaxZ);
+                        
                         
 
                         ref Bin bin = ref framebuffer.bins[binIndex];
