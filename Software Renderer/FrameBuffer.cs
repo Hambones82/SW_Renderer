@@ -389,6 +389,11 @@ namespace Software_Renderer
             }
         }               
 
+        public int ScreenCoordsToElementID(int x, int y)
+        {
+            return y * width + x;
+        }
+
         //returns the linear element ID
         private int ElementIDToScreenCoords(int elementID, int level, out int x, out int y)
         {
@@ -410,9 +415,66 @@ namespace Software_Renderer
 
             return y * width + x;
         }
-
+               
         
-        //also set coverage mask...
+        //OK I THINK THIS IS OK BUT CHECK
+        public float GetHiZ(int level, int cellX, int cellY)
+        {
+            int screenX = XCellToFirstScreenCoord(cellX, hiZBuffer[level].reductionX);
+            int screenY = YCellToFirstScreenCoord(cellY, hiZBuffer[level].reductionY);
+            int elementID = GetHiZElementID(screenX, screenY, level);
+            if (hiZBuffer[level].validData[elementID])
+            {
+                return hiZBuffer[level].depthData[elementID];
+            }
+            else
+            {                
+                int relativeReductionXPow2 = 3 * (hiZBuffer[level].reductionX - hiZBuffer[level - 1].reductionX);
+                int relativeReductionYPow2 = 3 * (hiZBuffer[level].reductionY - hiZBuffer[level - 1].reductionY);
+
+                int relative2DReductionPow2 = relativeReductionXPow2 + relativeReductionYPow2;
+                int numChildCellsInParentCellXDirection = 1 << relativeReductionXPow2;
+                int numChildCellsInParentCellYDirection = 1 << relativeReductionYPow2;
+                int numLanesInCell = 1 << relative2DReductionPow2;
+
+                int cellXParent = cellX;
+                int cellYParent = cellY;
+
+                int cellXChild = XScreenToCellCoord(screenX, hiZBuffer[level - 1].reductionX);
+                int cellYChild = YScreenToCellCoord(screenY, hiZBuffer[level - 1].reductionY);
+
+                //To identify the cell coordinates of the first lane, first convert from screen x, screen y to the lane's (child) level
+                //Then % that number by true reduction for both cell x and cell y.  not the actual true reduction but the RELATIVE
+                //true reduction.
+
+                float maxSeenDepth = float.MinValue;
+                int cellXOfMax = 0;
+                int cellYOfMax = 0;
+
+                for (int xIncrement = 0; xIncrement < numChildCellsInParentCellXDirection; xIncrement++)
+                {
+                    int x = xIncrement + cellXChild;
+                    for (int yIncrement = 0; yIncrement < numChildCellsInParentCellYDirection; yIncrement++)
+                    {
+                        int y = yIncrement + cellYChild;
+                        float cellDepth = GetHiZ(level - 1, x, y);
+                        if(cellDepth > maxSeenDepth)
+                        {
+                            maxSeenDepth = cellDepth;
+                            cellXOfMax = x;
+                            cellYOfMax = y;
+                        }
+                    }
+                }
+                hiZBuffer[level].depthData[elementID] = maxSeenDepth;
+                hiZBuffer[level].validData[elementID] = true;
+                hiZBuffer[level].cellXYOfMax[elementID] = new Coord2D(cellXOfMax, cellYOfMax);
+
+                return maxSeenDepth;                
+            }
+        }
+        
+        
         public void SetPixelParallel(int xStart, int y, int pixelNum,
                                      Vector<int> depthAndCoveragemask, Vector<float> depthAndCoverageMaskedDepth, Vector<uint> color)
         {            
@@ -455,7 +517,7 @@ namespace Software_Renderer
                 //here, "mask" already has the depth test encoded in it.
                 //also, we will only get here if there is at least one update...
 
-                //UpdateHiZSIMD(newFBDepths, depthAndCoveragemask, pixelNum, xStart, y);
+                UpdateHiZSIMD(newFBDepths, xStart, y);
             }                         
         }
 

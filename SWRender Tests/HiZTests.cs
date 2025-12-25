@@ -154,10 +154,9 @@ namespace SWRender_Tests
             Assert.Equal(cellCount, level.validData.Length);
         }
 
-        [Fact]
-        public void TestLowestLevelHiZWritesToEmpty_FirstParentCell()
-        {
-            FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
+        private void TestLowestLevelWrites(ref FrameBuffer fb, int elementNumber,
+                                           Coord2D cellUpdate, Coord2D expectedCellOfMax, bool expectedValidity)
+        {            
             Span<float> depthValues = stackalloc float[Constants.SIMDCount];
             for (int i = 0; i < Constants.SIMDCount; i++)
             {
@@ -165,13 +164,19 @@ namespace SWRender_Tests
                 depthValues[i] = i * 0.1f;
             }
             Vector<float> depths = new Vector<float>(depthValues);
-            fb.UpdateHiZSIMD(depths, 0, 0);
-            
-            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
-            Debug.Assert(testingLevel.cellXYOfMax[0] == new Coord2D(7, 0));
-            Debug.Assert(testingLevel.validData[0] == true);
-            Debug.Assert(testingLevel.depthData[0] == 0.7f);
+            fb.UpdateHiZSIMD(depths, cellUpdate.x, cellUpdate.y);
 
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
+            Debug.Assert(testingLevel.cellXYOfMax[elementNumber] == expectedCellOfMax);
+            Debug.Assert(testingLevel.validData[elementNumber] == expectedValidity);
+            Debug.Assert(testingLevel.depthData[elementNumber] == 0.7f);
+        }
+
+        [Fact]
+        public void TestLowestLevelHiZWritesToEmpty_FirstParentCell()
+        {
+            FrameBuffer fb = new FrameBuffer(256, 256);
+            TestLowestLevelWrites(ref fb, 0, new Coord2D(0,0), new Coord2D(7, 0), true);
         }
 
         [Theory]
@@ -181,21 +186,9 @@ namespace SWRender_Tests
         public void TestLowestLevelHiZWritesToEmpty_NthParentCell(int screenX, int screenY)
         {
             FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
-            Span<float> depthValues = stackalloc float[Constants.SIMDCount];
-            for (int i = 0; i < Constants.SIMDCount; i++)
-            {
-                //0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7
-                depthValues[i] = i * 0.1f;
-            }
-            Vector<float> depths = new Vector<float>(depthValues);
-            fb.UpdateHiZSIMD(depths, screenX, screenY);
-            
-            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
-
             int elementID = fb.GetHiZElementID(screenX, screenY, 0);
-            Debug.Assert(testingLevel.cellXYOfMax[elementID] == new Coord2D(screenX + 7, screenY));
-            Debug.Assert(testingLevel.validData[elementID] == true);
-            Debug.Assert(testingLevel.depthData[elementID] == 0.7f);
+            TestLowestLevelWrites(ref fb, elementID, new Coord2D(screenX, screenY), new Coord2D(screenX+7, screenY), true);                        
+            ref DepthLevel testingLevel = ref fb.hiZBuffer[0];
             Debug.Assert(testingLevel.depthData[(elementID + 1) % testingLevel.sizeInCells] == float.MaxValue);
         }
 
@@ -229,12 +222,12 @@ namespace SWRender_Tests
             Debug.Assert(testingLevel.validData[elementID] == true);
             Debug.Assert(testingLevel.depthData[elementID] == 0.35f);
             Debug.Assert(testingLevel.depthData[(elementID + 1) % testingLevel.sizeInCells] == float.MaxValue);
-        }
-        
+        }        
+
         [Theory]
-        [InlineData(64, 128)]
-        [InlineData(80, 136)]
-        [InlineData(88, 192)]
+        [InlineData(64, 129)]
+        [InlineData(80, 137)]
+        [InlineData(88, 193)]
         public void TestNoInvalidationsInHigherLevels(int screenX, int screenY)
         {
             FrameBuffer fb = new FrameBuffer(256, 256);//256/8, 256/8
@@ -390,6 +383,120 @@ namespace SWRender_Tests
             elementID = fb.GetHiZElementID(screenX, screenY, 3);
             Debug.Assert(testingLevel.validData[elementID] == true);
             Debug.Assert(testingLevel.validData[(elementID + 1) % testingLevel.sizeInCells] == true);
+        }
+
+        [Fact]
+        public void TestHiZFirstCellWrites()
+        {
+            FrameBuffer fb = new FrameBuffer(256, 256);
+            Vector<int> mask = Vector<int>.AllBitsSet;
+            Vector<uint> color = Vector<uint>.AllBitsSet;
+            Vector<float> depths = V(0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.5f, 0.6f);
+            fb.SetPixelParallel(0, 0, 0, mask, depths, color);
+
+            //now the asserts -- what is the result of this?
+            Debug.Assert(fb.GetHiZ(0, 0, 0) == 0.6f);
+            Debug.Assert(fb.GetHiZ(0, 1, 0) == float.MaxValue);
+            Debug.Assert(fb.GetHiZ(1, 0, 0) == float.MaxValue);
+            //set the remaining rows in the first 8x8 (level 1)
+            for(int y = 1; y < 8; y++)
+            {
+                fb.SetPixelParallel(0, y, fb.ScreenCoordsToElementID(0, y), mask, depths, color);
+            }
+            Debug.Assert(fb.GetHiZ(1, 0, 0) == 0.6f);
+            Debug.Assert(fb.GetHiZ(2, 0, 0) == float.MaxValue);
+            Debug.Assert(fb.GetHiZ(3, 0, 0) == float.MaxValue);
+            //write the remaining for level 2
+            for(int x = 8; x <=56; x+=8)
+            {
+                for (int y = 0; y < 8; y++)
+                {
+                    fb.SetPixelParallel(x, y, fb.ScreenCoordsToElementID(x, y), mask, depths, color);
+                }
+            }
+            Debug.Assert(fb.GetHiZ(1, 0, 0) == 0.6f);
+            Debug.Assert(fb.GetHiZ(2, 0, 0) == 0.6f);
+            Debug.Assert(fb.GetHiZ(3, 0, 0) == float.MaxValue);
+            //write the remaining for level 3
+            for(int yStride = 8; yStride <= 56; yStride+=8)
+            {
+                for (int x = 0; x <= 56; x += 8)
+                {
+                    for (int y = 0; y < 8; y++)
+                    {
+                        fb.SetPixelParallel(x, y + yStride, fb.ScreenCoordsToElementID(x, y + yStride), mask, depths, color);
+                    }
+                }
+            }
+            Debug.Assert(fb.GetHiZ(1, 0, 0) == 0.6f);
+            Debug.Assert(fb.GetHiZ(2, 0, 0) == 0.6f);
+            Debug.Assert(fb.GetHiZ(3, 0, 0) == 0.6f);
+        }
+
+        [Theory]
+        [InlineData(0, 0)]      //first of all levels - all should be invalidated
+        [InlineData(64, 64)]     //same
+        [InlineData(64, 0)]    //same
+        public void TestHiZCellWrites(int screenX, int screenY)
+        {            
+            //need a bunch of asserts for the input data - must align to 8, must not be out of bounds, not neg, etc
+            FrameBuffer fb = new FrameBuffer(256, 256);
+            Debug.Assert(screenX % 64 == 0 && screenY % 64 == 0);
+            Debug.Assert(screenX >= 0 && screenX < 256);
+            Debug.Assert(screenY >= 0 && screenY < 256);
+            Vector<int> mask = Vector<int>.AllBitsSet;
+            Vector<uint> color = Vector<uint>.AllBitsSet;
+            Vector<float> depths = V(0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.5f, 0.6f);
+            
+            //fb.SetPixelParallel(screenX, screenY, elementID, mask, depths, color);
+
+            int redX1 = fb.hiZBuffer[1].reductionX;
+            int redY1 = fb.hiZBuffer[1].reductionY;
+            int redX2 = fb.hiZBuffer[2].reductionX;
+            int redY2 = fb.hiZBuffer[2].reductionY;
+            int redX3 = fb.hiZBuffer[3].reductionX;
+            int redY3 = fb.hiZBuffer[3].reductionY;
+
+            int L1CellX = fb.XScreenToCellCoord(screenX, redX1);
+            int L1CellY = fb.YScreenToCellCoord(screenY, redY1);
+            int L2CellX = fb.XScreenToCellCoord(screenX, redX2);
+            int L2CellY = fb.YScreenToCellCoord(screenY, redY2);
+            int L3CellX = fb.XScreenToCellCoord(screenX, redX3);
+            int L3CellY = fb.YScreenToCellCoord(screenY, redY3);
+
+            //setting an entire tile starting at the input Y coord
+            for (int y = screenY; y < screenY+8; y++)
+            {
+                fb.SetPixelParallel(screenX, y, fb.ScreenCoordsToElementID(screenX, y), mask, depths, color);
+            }
+            Debug.Assert(fb.GetHiZ(1, L1CellX, L1CellY) == 0.6f);
+            Debug.Assert(fb.GetHiZ(2, L2CellX, L2CellY) == float.MaxValue);
+            Debug.Assert(fb.GetHiZ(3, L3CellX, L3CellY) == float.MaxValue);
+            //write the remaining for level 2
+            for (int x = screenX + 8; x <= screenX + 56; x += 8)
+            {
+                for (int y = screenY; y < screenY + 8; y++)
+                {
+                    fb.SetPixelParallel(x, y, fb.ScreenCoordsToElementID(x, y), mask, depths, color);
+                }
+            }
+            Debug.Assert(fb.GetHiZ(1, L1CellX, L1CellY) == 0.6f);
+            Debug.Assert(fb.GetHiZ(2, L2CellX, L2CellY) == 0.6f);
+            Debug.Assert(fb.GetHiZ(3, L3CellX, L3CellY) == float.MaxValue);
+            //write the remaining for level 3
+            for (int yStride = 8; yStride <= 56; yStride += 8)
+            {
+                for (int x = screenX; x <= screenX + 56; x += 8)
+                {
+                    for (int y = screenY; y < screenY + 8; y++)
+                    {
+                        fb.SetPixelParallel(x, y + yStride, fb.ScreenCoordsToElementID(x, y + yStride), mask, depths, color);
+                    }
+                }
+            }
+            Debug.Assert(fb.GetHiZ(1, L1CellX, L1CellY) == 0.6f);
+            Debug.Assert(fb.GetHiZ(2, L2CellX, L2CellY) == 0.6f);
+            Debug.Assert(fb.GetHiZ(3, L3CellX, L3CellY) == 0.6f);
         }
     }
 }
