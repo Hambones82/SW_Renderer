@@ -394,7 +394,8 @@ namespace Software_Renderer
             
             if (tri.area <= 0) return;
             //thsi is a constant
-            int SIMDcount = Vector<float>.Count;
+            //int SIMDcount = Vector<float>.Count;
+            int SIMDcount = Constants.SIMDCount;
             
             Vector<float> w0TLBin = tri.w0TL 
                                 + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.w0dx)
@@ -513,10 +514,22 @@ namespace Software_Renderer
                 w1Bary += new Vector<float>(tri.w1Barydx * horizontalOffset);
                 w2Bary += new Vector<float>(tri.w2Barydx * horizontalOffset);
 
+                var w0LoopIncrement = new Vector<float>(tri.w0dx * SIMDcount);
+                var w1LoopIncrement =  new Vector<float>(tri.w1dx * SIMDcount);
+                var w2LoopIncrement = new Vector<float>(tri.w2dx * SIMDcount);
+
+                var w0BaryLoopIncrement = new Vector<float>(tri.w0Barydx * SIMDcount);
+                var w1BaryLoopIncrement = new Vector<float>(tri.w1Barydx * SIMDcount);
+                var w2BaryLoopIncrement = new Vector<float>(tri.w2Barydx * SIMDcount);
+
+                var depthLoopIncrement = new Vector<float>(tri.depthdx * SIMDcount);
+
                 depth += new Vector<float>(tri.depthdx * horizontalOffset);
 
                 Vector<int> initialMask = Vector.GreaterThanOrEqual(Vector<int>.Indices,
                     new Vector<int>(maskedInitialPixels));//we need a mask that masks out the left-most pixels
+
+
 
                 const bool renderSIMD = true;
                 //add a check on the hiz level 0 against min z calculated based on setup.
@@ -526,11 +539,12 @@ namespace Software_Renderer
                     if (x + SIMDcount > xi1 + 1) { break; }
                     Vector<float> storedDepths = new Vector<float>(frameBuffer.depth, pixelNum);
                     Vector<int> depthComp = Vector.LessThanOrEqual(depth, storedDepths);
+                    //If I move this to an initial iteration, I can get rid of the overhead of this statement every iteration.
                     Vector<int> mask = depthComp & initialMask;
                     //i don't think we should do this here, but rather in fb...  instead, just pass in all calculated
                     //depths with the "basic" (raster-based) mask
                     var comboDepths = Vector.ConditionalSelect(mask, depth, storedDepths);
-                    initialMask = new Vector<int>(-1);
+                    initialMask = Vector<int>.AllBitsSet;// new Vector<int>(-1);
                     if (!Vector.EqualsAll(depthComp, Vector<int>.Zero) && renderSIMD)
                     {
                         var color = pixelShader.ParallelShade(Vector.ConvertToInt32(xValues),
@@ -539,16 +553,16 @@ namespace Software_Renderer
                     }
 
                     pixelNum += SIMDcount;
-                    xValues += new Vector<float>(SIMDcount);
-                    w0 += new Vector<float>(tri.w0dx * SIMDcount);
-                    w1 += new Vector<float>(tri.w1dx * SIMDcount);
-                    w2 += new Vector<float>(tri.w2dx * SIMDcount);
+                    xValues += Constants.SIMDCountVector;
+                    w0 += w0LoopIncrement;
+                    w1 += w1LoopIncrement;
+                    w2 += w2LoopIncrement;
 
-                    w0Bary += new Vector<float>(tri.w0Barydx * SIMDcount);
-                    w1Bary += new Vector<float>(tri.w1Barydx * SIMDcount);
-                    w2Bary += new Vector<float>(tri.w2Barydx * SIMDcount);
+                    w0Bary += w0BaryLoopIncrement;
+                    w1Bary += w1BaryLoopIncrement;
+                    w2Bary += w2BaryLoopIncrement;
 
-                    depth += new Vector<float>(tri.depthdx * SIMDcount);
+                    depth += depthLoopIncrement;
                 }
                 //THIS CAN BE REMOVED AND ABSORBED INTO THE MAIN LOOP
                 //tail --> mask out the final bits.  we could really include this in main loop and have check there.

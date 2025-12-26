@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace Software_Renderer
 {
-    public record Coord2D(int x, int y);
+    public record struct Coord2D(int x, int y);
 
     public struct Bin
     {
@@ -70,14 +70,13 @@ namespace Software_Renderer
             //this just isn't right...
             Array.Fill(cellXYOfMax, new Coord2D(0,0));            
         }   
-        /*
+        
         public void Reset()
         {
             Array.Fill(depthData, float.MaxValue);
             Array.Fill(validData, true);
-
-            //reset needs to also clear cell xy of max...  
-        }*/
+            Array.Fill(cellXYOfMax, new Coord2D(0, 0));            
+        }
     }
 
     public class FrameBuffer
@@ -176,6 +175,11 @@ namespace Software_Renderer
                     }                    
                 }
             }
+        }
+
+        public void ClearFrame()
+        {
+
         }
 
         //we need a CLEAR FRAME function...
@@ -285,39 +289,7 @@ namespace Software_Renderer
             return hiZBuffer[level].numCellsInX * cellYParent + cellXParent;
         }
 
-        /*
-        private void GetHiZElementIDAndLaneID(int x, int y, int parentLevel, out int parentElementID, out int childLaneID)
-        {
-            int reductionXChild = hiZBuffer[parentLevel-1].reductionX;
-            int reductionYChild = hiZBuffer[parentLevel-1].reductionY;
-            int reductionXParent = hiZBuffer[parentLevel].reductionX;
-            int reductionYParent = hiZBuffer[parentLevel].reductionY;
-            int cellXChild = XScreenToCellCoord(x, reductionXChild);
-            int cellYChild = YScreenToCellCoord(y, reductionYChild);
-            int cellXParent = XScreenToCellCoord(x, reductionXParent);
-            int cellYParent = YScreenToCellCoord(y, reductionYParent);
-
-            parentElementID = hiZBuffer[parentLevel].numCellsInX * cellYParent + cellXParent;
-
-            int childCountX = 1 << (3 * (reductionXParent - reductionXChild));
-            int childCountY = 1 << (3 * (reductionYParent - reductionYChild));
-            
-            int localX = (cellXChild & (childCountX-1));
-            int localY = (cellYChild & (childCountY-1));
-
-            childLaneID = localX + localY * childCountX;
-        }*/
-        //--END HI-Z HELPER FUNCTIONS--
-
-        //problem here is...  we are keeping track of LANE ID.  
-        //i think we really want cell x and y of the max...
-        //right now this only works if there is expansion from previous level in only one dimension
-        //this already doesn't work with SIMDCount = 4...
-
-        //for this function, i think we really need to test it.
-        //must ASSERT that, effectively, x mod 8 is 0...
-        //another assumption is that the incoming depth MUST be <= what's in the db
-        //this is not reflected in an assertion
+        
         public void UpdateHiZSIMD(Vector<float> depthToBeAtDest, int x, int y)
         {
             Debug.Assert((x % 8 == 0), "UpdateHiZSIMD must write on SIMD-wide boundaries (e.g., %8 = 0)");
@@ -537,6 +509,11 @@ namespace Software_Renderer
             Array.Fill(depth, float.MaxValue);
             Array.Fill(tileMinDepth, float.MaxValue);
             Array.Fill(tileMaxDepth, float.MaxValue);
+            for(int i = 0; i < 4; i++) 
+            {
+                hiZBuffer[i].Reset();
+            }
+            //also need to clear hiz...
         }
 
         public void ClearCoverage()

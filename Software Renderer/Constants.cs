@@ -11,6 +11,7 @@ namespace Software_Renderer
     {
         public static Vector<float> SIMDIncrement;
         public static int SIMDCount;
+        public static Vector<float> SIMDCountVector;
 
         static Constants()
         {
@@ -21,6 +22,7 @@ namespace Software_Renderer
             }
             SIMDIncrement = new Vector<float>(values);
             SIMDCount = Vector<float>.Count;
+            SIMDCountVector = new Vector<float>(SIMDCount);
         }
     }
 }
