@@ -393,8 +393,7 @@ namespace Software_Renderer
             int y1 = Math.Min(fbHeight - 1, (int)Math.Ceiling(maxY));
             
             if (tri.area <= 0) return;
-            //thsi is a constant
-            //int SIMDcount = Vector<float>.Count;
+            
             int SIMDcount = Constants.SIMDCount;
             
             Vector<float> w0TLBin = tri.w0TL 
@@ -407,30 +406,25 @@ namespace Software_Renderer
                                 + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.w2dx)
                                 + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.w2dy);
 
-            //values for top-left pixel in bin
-            //can adjust this to remove a division as this has already been done in triangle setup
             Vector<float> w0BaryTLBin = w0TLBin / tri.area;
             Vector<float> w1BaryTLBin = w1TLBin / tri.area;
             Vector<float> w2BaryTLBin = w2TLBin / tri.area;
 
             Vector<float> depthTLBin = tri.depthTL
                                     + new Vector<float>((x0 - tri.topLeftCoord.X) * tri.depthdx)
-                                    + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.depthdy);
-
+                                    + new Vector<float>((y0 - tri.topLeftCoord.Y) * tri.depthdy);            
             int xi0, xi1;
             int y = y0;
             bool found = false;
             while (y <= y1)
             {
                 if (TryGetSpanForScanlineWithSetup(y, ref tri, out float triMin, out float triMax))
-                {
-                    // Clip to tile in X
+                {                    
                     float clippedMin = MathF.Max(triMin, xClipLow);
                     float clippedMax = MathF.Min(triMax, xClipHigh);
 
                     if (clippedMin < clippedMax)
-                    {
-                        // This scanline actually intersects *this tile*.
+                    {                        
                         xi0 = (int)clippedMin;
                         xi1 = (int)clippedMax;
                         found = true;
@@ -441,26 +435,15 @@ namespace Software_Renderer
                 y++;
             }
 
-            //if there's no portion of the tri that's within the tile, no need to proceed
             if (!found) return;
 
-            //the span thing can be further optimized by walking the bounds on a top/bottom division.
-            //can't i just split all triangles into 2 triangles split by the midpoint?  then render first and render second.
             bool enteredTri = false;
+
             for (; y <= y1; y++)
             {                
                 var yVec = new Vector<int>((int)y);
                 float pY = (float)y + 0.5f;
 
-                //these only need to be calculated once per row, not once per bin per row.
-                //problem is though that because of binned architecture...  would have to cache this info somewhere.  bins only
-                //store tri ids...
-                //so we could do a pre-bin setup step...
-
-                //another good reason to do this early is we can know which tiles are fully covered -> 
-                //it's the tiles bewteen beginning and end of span taht also take up all rows
-                //this allows us to optimize the depth/coverage tests (if fully covered, can update, can discard)
-                //maybe we can even do hi-z stuff that early?
                 if (TryGetSpanForScanlineWithSetup(pY, ref tri, out float xMin, out float xMax))
                 {
                     xi0 = Math.Max(x0, (int)Math.Ceiling(xMin));
@@ -468,8 +451,6 @@ namespace Software_Renderer
                 }
                 else
                 {
-                    //we can do an early exit here.  if we've already rendered any row and there's no more spans, we're definitely
-                    //out of the tri.
                     if (enteredTri) return;
                     continue;
                 }
@@ -478,7 +459,6 @@ namespace Software_Renderer
                 Vector<float> w1 = w1TLBin + new Vector<float>((y - y0) * tri.w1dy);
                 Vector<float> w2 = w2TLBin + new Vector<float>((y - y0) * tri.w2dy);
 
-                //same for bary, depth
                 Vector<float> w0Bary = w0BaryTLBin + new Vector<float>((y - y0) * tri.w0Barydy);
                 Vector<float> w1Bary = w1BaryTLBin + new Vector<float>((y - y0) * tri.w1Barydy);
                 Vector<float> w2Bary = w2BaryTLBin + new Vector<float>((y - y0) * tri.w2Barydy);
@@ -486,10 +466,6 @@ namespace Software_Renderer
                 Vector<float> depth = depthTLBin + new Vector<float>((y - y0) * tri.depthdy);
 
 
-
-                //this just aligns the initial pixel to the SIMD boundary.  
-                //it over-draws in the left direction, though, so we need to mask that out.
-                //we don't need to do it in the simd-tail way, because there's no way the initial set of values will underflow
                 int origxi0 = xi0;
                 int maskedInitialPixels = xi0 % SIMDcount;
                 xi0 -= maskedInitialPixels;
@@ -525,7 +501,7 @@ namespace Software_Renderer
                 var depthLoopIncrement = new Vector<float>(tri.depthdx * SIMDcount);
 
                 depth += new Vector<float>(tri.depthdx * horizontalOffset);
-
+                //CHECK MAX DEPTH AGAINST APPROPRIATE HIZ DATA.  MAX DEPTH CAN JUST BE FIRST OR LAST BASED ON DX.
                 Vector<int> initialMask = Vector.GreaterThanOrEqual(Vector<int>.Indices,
                     new Vector<int>(maskedInitialPixels));//we need a mask that masks out the left-most pixels
 
